@@ -1,35 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudio, MASTER_LEVEL, MAX_VOICES, type GameAudio } from './sfx';
-import { engineFrequency, engineLevel, screechIntensity } from './engine';
+import { engineFrequency, engineLevel, LOOP_DUCK, screechFrequency, screechIntensity } from './engine';
 import { TUNING } from '../shared/tuning';
 import { DEG } from '../shared/math';
 import type { CarState, GameEvent, RaceResult } from '../shared/types';
 
 function car(over: Partial<CarState> = {}): CarState {
-  return {
-    x: 0, z: 0, heading: 0, vx: 0, vz: 0, yawRate: 0, steer: 0, mode: 'grip', driftDir: 0,
-    driftTime: 0, gripBlend: 1, modeTimer: 0, reverseHold: 0, wheelSpin: 0,
-    speed: 0, forwardSpeed: 0, lateralSpeed: 0, slip: 0, rpm: 0, ...over,
-  };
+  return { x: 0, z: 0, heading: 0, vx: 0, vz: 0, yawRate: 0, steer: 0, mode: 'grip', driftDir: 0, driftTime: 0, gripBlend: 1,
+    modeTimer: 0, reverseHold: 0, wheelSpin: 0, speed: 0, forwardSpeed: 0, lateralSpeed: 0, slip: 0, rpm: 0, ...over };
 }
+const DRIFT = car({ rpm: 0.9, speed: 30, slip: 35 * DEG, mode: 'drift', driftDir: 1 });
+const COIN: GameEvent = { type: 'coin', id: 1, x: 0, z: 0 };
 
-const RESULT: RaceResult = {
-  totalPoints: 4200, bestChain: 1800, totalTime: 180, lapTimes: [60, 60, 60], bestLap: 60,
-  coinsPicked: 20, coinsFromDrift: 4, coinsEarned: 24,
-};
+const RESULT: RaceResult = { totalPoints: 4200, bestChain: 1800, totalTime: 180, lapTimes: [60, 60, 60], bestLap: 60,
+  coinsPicked: 20, coinsFromDrift: 4, coinsEarned: 24 };
 
 const ALL_EVENTS: GameEvent[] = [
-  { type: 'countdown', value: 3 }, { type: 'countdown', value: 0 },
-  { type: 'coin', id: 1, x: 0, z: 0 },
+  { type: 'countdown', value: 3 }, { type: 'countdown', value: 0 }, COIN,
   { type: 'propKnocked', id: 'c1', kind: 'can', x: 0, z: 0, vx: 1, vz: 1 },
-  { type: 'hit', impactSpeed: 12, x: 0, z: 0 }, { type: 'hit', impactSpeed: 1e6, x: 0, z: 0 },
-  { type: 'scrape', x: 0, z: 0 },
-  { type: 'chainStart' }, { type: 'multiplier', value: 3 },
-  { type: 'chainBanked', points: 1240 }, { type: 'chainBurned', points: 300 },
-  { type: 'penalty', points: 100 },
+  { type: 'hit', impactSpeed: 12, x: 0, z: 0 }, { type: 'hit', impactSpeed: 1e6, x: 0, z: 0 }, { type: 'scrape', x: 0, z: 0 },
+  { type: 'chainStart' }, { type: 'multiplier', value: 3 }, { type: 'chainBanked', points: 1240 },
+  { type: 'chainBurned', points: 300 }, { type: 'penalty', points: 100 },
   { type: 'lap', lap: 1, lapTime: 61, best: true }, { type: 'lap', lap: 2, lapTime: 62, best: false },
-  { type: 'wrongWay', active: true }, { type: 'respawn' },
-  { type: 'finish', result: RESULT },
+  { type: 'wrongWay', active: true }, { type: 'respawn' }, { type: 'finish', result: RESULT },
 ];
 
 function exerciseEverything(a: GameAudio): void {
@@ -42,9 +35,7 @@ function exerciseEverything(a: GameAudio): void {
   a.setEngineActive(false);
 }
 
-// ---------------------------------------------------------------------------
-// Strict fake Web Audio: throws where real browsers throw, records automation.
-// ---------------------------------------------------------------------------
+// --- Strict fake Web Audio: throws where real browsers throw, records automation. ---
 
 interface Call { m: 'set' | 'linear' | 'exp' | 'target'; v: number; t: number }
 
@@ -55,22 +46,15 @@ function checkArgs(v: number, t: number): void {
 
 class FakeParam {
   calls: Call[] = [];
-  private v: number;
-  constructor(v: number) { this.v = v; }
+  constructor(private v: number) {}
   get value(): number { return this.v; }
   set value(x: number) { checkArgs(x, 0); this.v = x; }
-  setValueAtTime(v: number, t: number): this { checkArgs(v, t); this.calls.push({ m: 'set', v, t }); return this; }
-  linearRampToValueAtTime(v: number, t: number): this { checkArgs(v, t); this.calls.push({ m: 'linear', v, t }); return this; }
-  exponentialRampToValueAtTime(v: number, t: number): this {
-    checkArgs(v, t);
-    if (v === 0) throw new RangeError('exponential ramp to 0');
-    this.calls.push({ m: 'exp', v, t }); return this;
-  }
-  setTargetAtTime(v: number, t: number, tau: number): this {
-    checkArgs(v, t);
-    if (!(tau >= 0)) throw new RangeError('bad time constant');
-    this.calls.push({ m: 'target', v, t }); return this;
-  }
+  private push(m: Call['m'], v: number, t: number): this { checkArgs(v, t); this.calls.push({ m, v, t }); return this; }
+  setValueAtTime(v: number, t: number): this { return this.push('set', v, t); }
+  linearRampToValueAtTime(v: number, t: number): this { return this.push('linear', v, t); }
+  exponentialRampToValueAtTime(v: number, t: number): this { if (v === 0) throw new RangeError('exp ramp to 0'); return this.push('exp', v, t); }
+  setTargetAtTime(v: number, t: number, tau: number): this { if (!(tau >= 0)) throw new RangeError('bad tau'); return this.push('target', v, t); }
+  cancelScheduledValues(t: number): this { checkArgs(0, t); this.calls = this.calls.filter((c) => c.t < t); return this; }
   /** Value the param is heading to (last automation target, else the static value). */
   latest(): number { return this.calls.at(-1)?.v ?? this.v; }
 }
@@ -82,12 +66,9 @@ class FakeNode {
   disconnect(): void { this.outputs = []; }
 }
 class FakeGain extends FakeNode { gain = new FakeParam(1); }
-class FakeFilter extends FakeNode {
-  type = 'lowpass'; frequency = new FakeParam(350); Q = new FakeParam(1); gain = new FakeParam(0); detune = new FakeParam(0);
-}
+class FakeFilter extends FakeNode { type = 'lowpass'; frequency = new FakeParam(350); Q = new FakeParam(1); gain = new FakeParam(0); detune = new FakeParam(0); }
 class FakeCompressor extends FakeNode {
-  threshold = new FakeParam(-24); knee = new FakeParam(30); ratio = new FakeParam(12);
-  attack = new FakeParam(0.003); release = new FakeParam(0.25);
+  threshold = new FakeParam(-24); knee = new FakeParam(30); ratio = new FakeParam(12); attack = new FakeParam(0.003); release = new FakeParam(0.25);
 }
 class FakeSource extends FakeNode {
   started: number | undefined; stopped: number | undefined; onended: (() => void) | null = null;
@@ -96,30 +77,21 @@ class FakeSource extends FakeNode {
 }
 class FakeOsc extends FakeSource { type = 'sine'; frequency = new FakeParam(440); detune = new FakeParam(0); }
 class FakeBuffer {
-  private readonly data: Float32Array[];
-  constructor(readonly numberOfChannels: number, readonly length: number, readonly sampleRate: number) {
-    this.data = Array.from({ length: numberOfChannels }, () => new Float32Array(length));
-  }
+  private readonly data: Float32Array;
+  constructor(readonly numberOfChannels: number, readonly length: number, readonly sampleRate: number) { this.data = new Float32Array(length); }
   get duration(): number { return this.length / this.sampleRate; }
-  getChannelData(i: number): Float32Array { return this.data[i]; }
+  getChannelData(): Float32Array { return this.data; }
 }
 class FakeBufferSource extends FakeSource { buffer: FakeBuffer | null = null; loop = false; playbackRate = new FakeParam(1); }
 
 class FakeCtx {
   nodes: FakeNode[] = [];
   state: 'suspended' | 'running' | 'closed' = 'suspended';
-  currentTime = 1;
-  sampleRate = 48000;
-  resumeCalls = 0;
-  suspendCalls = 0;
-  /** When set, node creation throws (simulates a browser-specific Web Audio failure). */
-  broken = false;
+  currentTime = 1; sampleRate = 48000; resumeCalls = 0; suspendCalls = 0;
+  broken = false; // when set, oscillator creation throws (a browser-specific Web Audio failure)
   destination = new FakeNode(this, 'destination');
   createGain(): FakeGain { return new FakeGain(this, 'gain'); }
-  createOscillator(): FakeOsc {
-    if (this.broken) throw new Error('NotSupportedError');
-    return new FakeOsc(this, 'osc');
-  }
+  createOscillator(): FakeOsc { if (this.broken) throw new Error('NotSupportedError'); return new FakeOsc(this, 'osc'); }
   createBiquadFilter(): FakeFilter { return new FakeFilter(this, 'filter'); }
   createDynamicsCompressor(): FakeCompressor { return new FakeCompressor(this, 'compressor'); }
   createBufferSource(): FakeBufferSource { return new FakeBufferSource(this, 'bufferSource'); }
@@ -137,16 +109,32 @@ function setup(): { ctx: FakeCtx; audio: GameAudio; made: () => number } {
   return { ctx, audio, made: () => made };
 }
 
+type Started = ReturnType<typeof setup> & ReturnType<typeof loopSources> & { master: FakeGain };
+
+/** Unlocked audio over a fake context, with the master gain and the loop sources resolved. */
+async function started(): Promise<Started> {
+  const s = setup();
+  await s.audio.unlock();
+  return { ...s, master: masterOf(s.ctx), ...loopSources(s.ctx) };
+}
+
 /** Product of the latest gain targets on every path from `from` to `to` (max over paths). */
 function pathGain(from: FakeNode, to: FakeNode): number {
   if (from === to) return 1;
-  let best = 0;
-  for (const out of from.outputs) {
-    if (!(out instanceof FakeNode)) continue;
-    const g = pathGain(out, to);
-    best = Math.max(best, out instanceof FakeGain ? g * out.gain.latest() : g);
-  }
-  return best;
+  const nodes = from.outputs.filter((o): o is FakeNode => o instanceof FakeNode);
+  return Math.max(0, ...nodes.map((o) => pathGain(o, to) * (o instanceof FakeGain ? o.gain.latest() : 1)));
+}
+
+/** Gain nodes on some path from `from` to `to` (excluding `to`). */
+function gainsBetween(from: FakeNode, to: FakeNode): FakeGain[] {
+  const found: FakeGain[] = [];
+  const reaches = (n: FakeNode): boolean => {
+    // map (not some): every branch is walked so every gain on any path is collected.
+    const hit = n === to || n.outputs.filter((o): o is FakeNode => o instanceof FakeNode).map(reaches).includes(true);
+    if (hit && n !== to && n instanceof FakeGain && !found.includes(n)) found.push(n);
+    return hit;
+  };
+  return reaches(from) ? found : [];
 }
 
 function masterOf(ctx: FakeCtx): FakeGain {
@@ -159,10 +147,8 @@ function masterOf(ctx: FakeCtx): FakeGain {
 /** Looping sources: the engine oscillators (started, never stopped) and the screech noise. */
 function loopSources(ctx: FakeCtx): { engine: FakeOsc[]; screech: FakeBufferSource[] } {
   const live = ctx.sources().filter((s) => s.started !== undefined && s.stopped === undefined);
-  return {
-    engine: live.filter((s): s is FakeOsc => s instanceof FakeOsc && s.frequency.value > 20),
-    screech: live.filter((s): s is FakeBufferSource => s instanceof FakeBufferSource && s.loop),
-  };
+  return { engine: live.filter((s): s is FakeOsc => s instanceof FakeOsc && s.frequency.value > 20),
+    screech: live.filter((s): s is FakeBufferSource => s instanceof FakeBufferSource && s.loop) };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -187,14 +173,9 @@ describe('audio without Web Audio (node)', () => {
 
 describe('engine and screech mappings', () => {
   it('engine pitch rises monotonically with rpm and drifting adds wheelspin', () => {
-    let prev = 0;
-    for (let r = 0; r <= 1.0001; r += 0.1) {
-      const f = engineFrequency(r, false);
-      expect(f).toBeGreaterThan(prev);
-      prev = f;
-    }
-    expect(engineFrequency(0, false)).toBeGreaterThan(50);
-    expect(engineFrequency(1, false)).toBeLessThan(800);
+    const f = Array.from({ length: 11 }, (_, i) => engineFrequency(i / 10, false));
+    for (let i = 1; i < f.length; i++) expect(f[i]).toBeGreaterThan(f[i - 1]);
+    expect(f[0] > 50 && f[10] < 800).toBe(true);
     expect(engineFrequency(0.5, true)).toBeGreaterThan(engineFrequency(0.5, false));
     expect(engineFrequency(-3, false)).toBe(engineFrequency(0, false));
   });
@@ -216,57 +197,56 @@ describe('engine and screech mappings', () => {
     expect(wide).toBeGreaterThan(narrow);
     expect(wide).toBeLessThanOrEqual(1);
     const slide = screechIntensity(car({ speed: fast, slip: TUNING.drift.slipWide }), false);
-    expect(slide).toBeGreaterThan(0);
-    expect(slide).toBeLessThan(wide);
+    expect(slide > 0 && slide < wide).toBe(true);
     expect(screechIntensity(car({ speed: NaN, slip: NaN }), true)).toBe(0);
+  });
+
+  it('reversing does not screech; a sideways slide does whichever way the car rolls', () => {
+    const v = TUNING.car.maxReverseSpeed;
+    const back = (slip: number): CarState => car({ speed: v, forwardSpeed: -v, slip });
+    expect(screechIntensity(back(Math.PI), false)).toBe(0);
+    expect(screechIntensity(back(-Math.PI + 5 * DEG), false)).toBe(0);
+    const side = screechIntensity(car({ speed: v, forwardSpeed: v, slip: 40 * DEG }), false);
+    expect(side).toBeGreaterThan(0);
+    expect(screechIntensity(back(Math.PI - 40 * DEG), false)).toBeCloseTo(side);
+    expect(screechFrequency(back(Math.PI))).toBeCloseTo(screechFrequency(car({ speed: v })));
   });
 });
 
 describe('audio graph (fake AudioContext)', () => {
   it('unlock builds master gain -> compressor -> destination once and resumes', async () => {
-    const { ctx, audio, made } = setup();
-    await audio.unlock();
-    const master = masterOf(ctx);
+    const { ctx, audio, made, master, engine, screech } = await started();
     const comp = master.outputs[0] as FakeNode;
     expect(comp.kind).toBe('compressor');
     expect(comp.outputs).toContain(ctx.destination);
     expect(master.gain.value).toBeCloseTo(MASTER_LEVEL);
     expect(ctx.state).toBe('running');
     const nodeCount = ctx.nodes.length;
-    const loops = loopSources(ctx);
-    expect(loops.engine).toHaveLength(2);
-    expect(loops.screech).toHaveLength(1);
+    expect(engine).toHaveLength(2);
+    expect(screech).toHaveLength(1);
     await audio.unlock();
     expect(made()).toBe(1);
     expect(ctx.nodes.length).toBe(nodeCount);
   });
 
   it('engine/screech start silent; setEngineActive and update glide them with setTargetAtTime', async () => {
-    const { ctx, audio } = setup();
-    await audio.unlock();
-    const master = masterOf(ctx);
-    const { engine, screech } = loopSources(ctx);
+    const { audio, master, engine, screech } = await started();
     expect(pathGain(engine[0], master)).toBe(0);
-
     audio.setEngineActive(true);
     audio.update(car({ rpm: 0.1, speed: 4 }), 0, false, 1 / 60);
     expect(pathGain(engine[0], master)).toBeGreaterThan(0);
     expect(pathGain(screech[0], master)).toBe(0);
     const slowF = engine[0].frequency.latest();
-
-    audio.update(car({ rpm: 0.9, speed: 30, slip: 35 * DEG, mode: 'drift', driftDir: 1 }), 1, true, 1 / 60);
+    audio.update(DRIFT, 1, true, 1 / 60);
     expect(engine[0].frequency.latest()).toBeGreaterThan(slowF);
     expect(pathGain(screech[0], master)).toBeGreaterThan(0);
     for (const o of engine) expect(o.frequency.calls.every((c) => c.m === 'target')).toBe(true);
-
     audio.setEngineActive(false);
-    expect(pathGain(engine[0], master)).toBe(0);
-    expect(pathGain(screech[0], master)).toBe(0);
+    expect(pathGain(engine[0], master) + pathGain(screech[0], master)).toBe(0);
   });
 
   it('survives non-finite car state without passing NaN to Web Audio', async () => {
-    const { audio } = setup();
-    await audio.unlock();
+    const { audio } = await started();
     audio.setEngineActive(true);
     expect(() => audio.update(car({ rpm: NaN, speed: Infinity, slip: NaN }), NaN, true, 1 / 60)).not.toThrow();
     expect(() => audio.update(car(), 0, false, NaN)).not.toThrow();
@@ -285,42 +265,34 @@ describe('audio graph (fake AudioContext)', () => {
   });
 
   it('every event type schedules click-free one-shots (or nothing) without throwing', async () => {
-    const { ctx, audio } = setup();
-    await audio.unlock();
+    const { ctx, audio } = await started();
     const before = ctx.nodes.length;
     for (const e of ALL_EVENTS) expect(() => audio.onEvent(e)).not.toThrow();
     const fresh = ctx.nodes.slice(before);
     const shots = fresh.filter((n): n is FakeSource => n instanceof FakeSource);
     expect(shots.length).toBeGreaterThan(10);
-    for (const s of shots) {
-      expect(s.started).toBeGreaterThanOrEqual(ctx.currentTime);
-      expect(s.stopped).toBeGreaterThan(s.started as number);
-    }
+    for (const s of shots) expect((s.started as number) >= ctx.currentTime && (s.stopped as number) > (s.started as number)).toBe(true);
     for (const g of fresh.filter((n): n is FakeGain => n instanceof FakeGain)) {
       expect(g.gain.calls[0]).toMatchObject({ m: 'set', v: 0 });
-      const last = g.gain.calls.at(-1) as Call;
-      expect(last.v).toBeLessThanOrEqual(0.001);
+      expect((g.gain.calls.at(-1) as Call).v).toBeLessThanOrEqual(0.001);
     }
   });
 
   it('sound-less events, the final lap chime and muted events allocate nothing', async () => {
-    const { ctx, audio } = setup();
-    await audio.unlock();
+    const { ctx, audio } = await started();
     const n0 = ctx.nodes.length;
-    audio.onEvent({ type: 'chainStart' });
-    audio.onEvent({ type: 'respawn' });
-    audio.onEvent({ type: 'wrongWay', active: true });
-    audio.onEvent({ type: 'lap', lap: TUNING.race.laps, lapTime: 60, best: true });
+    const silent: GameEvent[] = [{ type: 'chainStart' }, { type: 'respawn' }, { type: 'wrongWay', active: true },
+      { type: 'multiplier', value: 3 }, { type: 'lap', lap: TUNING.race.laps, lapTime: 60, best: true }];
+    for (const e of silent) audio.onEvent(e);
     expect(ctx.nodes.length).toBe(n0);
     audio.setMuted(true);
-    audio.onEvent({ type: 'coin', id: 1, x: 0, z: 0 });
+    audio.onEvent(COIN);
     audio.onEvent({ type: 'finish', result: RESULT });
     expect(ctx.nodes.length).toBe(n0);
   });
 
   it('caps simultaneous one-shot voices and frees them on ended', async () => {
-    const { ctx, audio } = setup();
-    await audio.unlock();
+    const { ctx, audio } = await started();
     const n0 = ctx.sources().length;
     for (let i = 0; i < 200; i++) audio.onEvent({ type: 'coin', id: i, x: 0, z: 0 });
     const shots = ctx.sources().slice(n0);
@@ -330,39 +302,84 @@ describe('audio graph (fake AudioContext)', () => {
     expect(ctx.sources().length).toBeGreaterThan(n0 + shots.length);
   });
 
-  it('suspend fades the master out, then suspends; resume restores; nothing is scheduled while paused', async () => {
+  it('suspend fades out then suspends; nothing is scheduled while paused; resume (even a quick one) restores', async () => {
     vi.useFakeTimers();
-    const { ctx, audio } = setup();
-    await audio.unlock();
-    const master = masterOf(ctx);
+    const { ctx, audio, master, engine } = await started();
     audio.setEngineActive(true);
     audio.suspend();
     expect(master.gain.latest()).toBe(0);
     vi.advanceTimersByTime(500);
     expect(ctx.suspendCalls).toBe(1);
     const n0 = ctx.nodes.length;
-    const { engine } = loopSources(ctx);
     const calls0 = engine[0].frequency.calls.length;
     audio.update(car({ rpm: 0.8, speed: 25 }), 1, false, 1 / 60);
-    audio.onEvent({ type: 'coin', id: 1, x: 0, z: 0 });
+    audio.onEvent(COIN);
     audio.setMuted(false);
-    expect(master.gain.latest()).toBe(0);
-    expect(ctx.nodes.length).toBe(n0);
-    expect(engine[0].frequency.calls.length).toBe(calls0);
+    expect([master.gain.latest(), ctx.nodes.length, engine[0].frequency.calls.length]).toEqual([0, n0, calls0]);
     audio.resume();
-    expect(ctx.resumeCalls).toBe(2);
-    expect(ctx.state).toBe('running');
-    expect(master.gain.latest()).toBeCloseTo(MASTER_LEVEL);
+    expect([ctx.resumeCalls, ctx.state, master.gain.latest()]).toEqual([2, 'running', MASTER_LEVEL]);
+    // A quick suspend -> resume never leaves the context suspended.
+    audio.suspend(); audio.resume();
+    vi.advanceTimersByTime(500);
+    expect([ctx.suspendCalls, ctx.state]).toEqual([1, 'running']);
+  });
+
+  it('turning the engine off while paused cuts the loops instead of gliding on a frozen clock', async () => {
+    vi.useFakeTimers();
+    const { ctx, audio, master, engine, screech } = await started();
+    audio.setEngineActive(true);
+    audio.update(DRIFT, 1, true, 1 / 60);
+    audio.suspend(); vi.advanceTimersByTime(500); // paused mid-drift, context suspended
+    audio.setEngineActive(false);
+    for (const src of [engine[0], screech[0]]) {
+      const zeroed = gainsBetween(src, master).filter((g) => g.gain.latest() === 0);
+      expect(zeroed.length).toBeGreaterThan(0);
+      for (const g of zeroed) expect(g.gain.calls.at(-1)).toMatchObject({ m: 'set', v: 0, t: ctx.currentTime });
+    }
+    await audio.unlock();
+    expect(pathGain(engine[0], master) + pathGain(screech[0], master)).toBe(0);
+  });
+
+  it('re-enabling after silence restarts the engine at idle; a quick re-enable glides on', async () => {
+    const { ctx, audio, engine: [osc] } = await started();
+    const idle = engineFrequency(0, false);
+    audio.setEngineActive(true);
+    audio.update(car({ rpm: 0.9, speed: 30 }), 1, false, 1 / 60);
+    const high = osc.frequency.latest();
+    expect(high).toBeGreaterThan(idle * 2);
+    audio.setEngineActive(false);
+    ctx.currentTime += 0.05; // still fading out: no pitch jump
+    audio.setEngineActive(true);
+    expect(osc.frequency.latest()).toBe(high);
+    audio.setEngineActive(false);
+    ctx.currentTime += 1; // silent now: restart at idle
+    audio.setEngineActive(true);
+    expect(osc.frequency.calls.at(-1)).toMatchObject({ m: 'set', v: idle, t: ctx.currentTime });
+  });
+
+  it('reward cues duck the running loops and always recover; back-to-back cues hold one dip', async () => {
+    const { ctx, audio, master, engine: [osc] } = await started();
+    const ducker = (): FakeGain | undefined => gainsBetween(osc, master).find((g) => g.gain.calls.some((c) => c.v === LOOP_DUCK.level));
+    audio.onEvent(COIN);
+    audio.setEngineActive(true);
+    audio.onEvent({ type: 'hit', impactSpeed: 12, x: 0, z: 0 });
+    expect(ducker()).toBeUndefined();
+    audio.onEvent(COIN);
+    ctx.currentTime += 0.05;
+    audio.onEvent({ type: 'chainBanked', points: 900 });
+    const calls = (ducker() as FakeGain).gain.calls;
+    // Two dips, the coin's pending release dropped, one final release back to 1 after the last cue.
+    expect(calls.map((c) => c.v)).toEqual([LOOP_DUCK.level, LOOP_DUCK.level, 1]);
+    expect(calls.at(-1)).toMatchObject({ m: 'target', v: 1 });
+    expect((calls.at(-1) as Call).t).toBeGreaterThan(ctx.currentTime);
   });
 
   it('a Web Audio error mid-race turns audio off instead of crashing the game loop', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { ctx, audio } = setup();
-    await audio.unlock();
+    const { ctx, audio } = await started();
     ctx.broken = true;
-    expect(() => audio.onEvent({ type: 'coin', id: 1, x: 0, z: 0 })).not.toThrow();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(ctx.state).toBe('closed');
+    expect(() => audio.onEvent(COIN)).not.toThrow();
+    expect([warn.mock.calls.length, ctx.state]).toEqual([1, 'closed']);
     const n0 = ctx.nodes.length;
     expect(() => exerciseEverything(audio)).not.toThrow();
     await expect(audio.unlock()).resolves.toBeUndefined();
@@ -379,16 +396,5 @@ describe('audio graph (fake AudioContext)', () => {
     expect(ctx.state).toBe('closed');
     expect(() => exerciseEverything(audio)).not.toThrow();
     expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it('a quick suspend -> resume never leaves the context suspended', async () => {
-    vi.useFakeTimers();
-    const { ctx, audio } = setup();
-    await audio.unlock();
-    audio.suspend();
-    audio.resume();
-    vi.advanceTimersByTime(500);
-    expect(ctx.suspendCalls).toBe(0);
-    expect(ctx.state).toBe('running');
   });
 });

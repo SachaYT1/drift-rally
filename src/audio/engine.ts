@@ -6,6 +6,8 @@
  * - tyre screech: looping white noise -> 2 cascaded bandpasses (centre wobbles a little)
  *   -> gain ∝ drift intensity.
  *
+ * Both feed a loop bus (on/off fade) -> duck gain (dips under reward cues) -> master.
+ *
  * Sources are created and started once (they cannot be restarted); everything else is driven
  * with `setTargetAtTime`, so parameter changes never click. The mapping functions are pure.
  */
@@ -62,6 +64,16 @@ export const SCREECH_VOICE = {
 
 /** Fade time constant for activating / silencing the whole loop bus, s. */
 const BUS_TAU = 0.07;
+/** After this long a fade-out is at -52 dB: params may be reset without an audible jump, s. */
+const BUS_SILENT_AFTER = 6 * BUS_TAU;
+
+/** Loop-bus dip under reward cues (coin, chain banked) so they are not buried by engine/screech. */
+export const LOOP_DUCK = {
+  /** Bus gain while ducked (about -4.4 dB). */
+  level: 0.6,
+  attackTau: 0.012,
+  releaseTau: 0.08,
+} as const;
 
 /** master gain -> compressor -> destination. Returns the master gain (the mix input). */
 export function buildMasterChain(ctx: BaseAudioContext, level: number): GainNode {
@@ -111,12 +123,22 @@ export function engineCutoff(rpm: number, throttle: number): number {
 }
 
 /**
- * Screech intensity 0..1 from |slip| and speed. A drift always screeches (floor), wider angles
- * louder; outside a drift only a real slide (|slip| above the scoring threshold) screeches.
+ * |slip| folded into [0, π/2], rad. slip is heading minus velocity heading, so rolling straight
+ * backwards gives |slip| ≈ π: that counts as aligned (reversing never screeches), while a sideways
+ * slide screeches whichever way the car is rolling. Non-finite input stays non-finite.
+ */
+export function slideAngle(slip: number): number {
+  const a = Math.abs(slip);
+  return a > Math.PI / 2 ? Math.max(0, Math.PI - a) : a;
+}
+
+/**
+ * Screech intensity 0..1 from the slide angle and speed. A drift always screeches (floor), wider
+ * angles louder; outside a drift only a real slide (above the scoring threshold) screeches.
  */
 export function screechIntensity(car: CarState, drifting: boolean): number {
   const speed = car.speed;
-  const slip = Math.abs(car.slip);
+  const slip = slideAngle(car.slip);
   if (!Number.isFinite(speed) || !Number.isFinite(slip)) return 0;
   const minSpeed = TUNING.drift.minSpeed;
   const speedK = clamp((speed - minSpeed * 0.25) / minSpeed, 0, 1);
@@ -130,7 +152,7 @@ export function screechIntensity(car: CarState, drifting: boolean): number {
 /** Screech band centre, Hz: higher with wider slip and more speed. */
 export function screechFrequency(car: CarState): number {
   const S = SCREECH_VOICE;
-  const slipK = unit(Math.abs(car.slip) / TUNING.drift.slipWide);
+  const slipK = unit(slideAngle(car.slip) / TUNING.drift.slipWide);
   const speed = Number.isFinite(car.speed) ? clamp(car.speed, 0, TUNING.car.maxSpeed) : 0;
   return S.baseHz + S.slipHz * slipK + S.speedHz * speed;
 }
@@ -146,8 +168,21 @@ function createBandpass(ctx: BaseAudioContext, hz: number, q: number): BiquadFil
 export interface LoopVoices {
   /** Glide engine/screech params toward the car state. `now` = context currentTime. */
   update(car: CarState, throttle: number, drifting: boolean, now: number): void;
-  /** Fade both voices in/out. Sources keep running silently (they cannot be restarted). */
-  setActive(on: boolean, now: number): void;
+  /**
+   * Fade both voices in/out. Sources keep running silently (they cannot be restarted).
+   * `cut`: when turning off, silence instantly instead of gliding. Use it when the output is
+   * already silent (paused / suspended context): a glide scheduled on a frozen clock would play
+   * out audibly after the next resume. Turning on from silence restarts the engine at idle.
+   */
+  setActive(on: boolean, now: number, cut?: boolean): void;
+  /** Dip the loops under a cue that starts at `at` and keep them down for `hold` s. */
+  duck(at: number, hold: number): void;
+}
+
+/** Cancels pending automation and jumps to `v` at `now`. Only for params that are inaudible. */
+function hardSet(p: AudioParam, v: number, now: number): void {
+  p.cancelScheduledValues(now);
+  p.setValueAtTime(v, now);
 }
 
 /** Builds the engine + screech graph into `out` and starts its sources. Starts silent. */
@@ -157,7 +192,8 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
 
   const bus = ctx.createGain();
   bus.gain.value = 0;
-  bus.connect(out);
+  const ducker = ctx.createGain();
+  bus.connect(ducker).connect(out);
 
   // Engine: saw + quieter square, slightly detuned, through a resonant lowpass.
   const saw = ctx.createOscillator();
@@ -201,6 +237,12 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
   screechGain.gain.value = 0;
   hiss.connect(bandA).connect(bandB).connect(screechGain).connect(bus);
 
+  /** Whether the bus is (fading) on, and the context time from which it is fully silent. */
+  let on = false;
+  let silentAt = 0;
+  /** Params were moved by update() since the last reset to idle. */
+  let stale = false;
+
   const t0 = ctx.currentTime;
   saw.start(t0);
   square.start(t0);
@@ -209,6 +251,7 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
 
   return {
     update(car, throttle, drifting, now) {
+      stale = true;
       const f = engineFrequency(car.rpm, drifting);
       saw.frequency.setTargetAtTime(f, now, E.pitchTau);
       square.frequency.setTargetAtTime(f, now, E.pitchTau);
@@ -222,10 +265,36 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
         bandB.frequency.setTargetAtTime(hz, now, S.tau);
       }
     },
-    setActive(on, now) {
-      bus.gain.setTargetAtTime(on ? 1 : 0, now, BUS_TAU);
-      // Never resume with a stale screech.
-      if (!on) screechGain.gain.setTargetAtTime(0, now, S.tau);
+    setActive(next, now, cut = false) {
+      if (next) {
+        // Back from silence: start at idle, not at the last race's pitch / screech.
+        if (stale && !on && now >= silentAt) {
+          stale = false;
+          hardSet(saw.frequency, E.idleHz, now);
+          hardSet(square.frequency, E.idleHz, now);
+          hardSet(lowpass.frequency, E.cutoffBaseHz, now);
+          hardSet(engineGain.gain, E.levelIdle, now);
+          hardSet(screechGain.gain, 0, now);
+        }
+        bus.gain.setTargetAtTime(1, now, BUS_TAU);
+      } else if (cut) {
+        hardSet(bus.gain, 0, now);
+        hardSet(screechGain.gain, 0, now);
+        silentAt = now;
+      } else if (on) {
+        bus.gain.setTargetAtTime(0, now, BUS_TAU);
+        // Never resume with a stale screech.
+        screechGain.gain.setTargetAtTime(0, now, S.tau);
+        silentAt = now + BUS_SILENT_AFTER;
+      }
+      on = next;
+    },
+    duck(at, hold) {
+      const D = LOOP_DUCK;
+      // Drop a pending release so back-to-back cues (a coin line) hold one dip instead of pumping.
+      ducker.gain.cancelScheduledValues(at);
+      ducker.gain.setTargetAtTime(D.level, at, D.attackTau);
+      ducker.gain.setTargetAtTime(1, at + Math.max(0, hold), D.releaseTau);
     },
   };
 }

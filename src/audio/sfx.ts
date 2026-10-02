@@ -3,6 +3,7 @@
  *
  * Graph: [engine + screech loop bus (engine.ts)] + [one-shot SFX]
  *        -> master gain -> DynamicsCompressor -> destination.
+ * Reward cues (coin, chain banked) briefly duck the loop bus so they cut through a drift.
  *
  * The AudioContext is created on the first `unlock()` (call it from a user gesture). Every method
  * is a safe no-op when Web Audio is missing (node, old browsers) or the context cannot be created.
@@ -63,6 +64,8 @@ const LAP_NOTES = [NOTE.G5, NOTE.C6] as const;
 const BEST_LAP_NOTES = [NOTE.G5, NOTE.C6, NOTE.E6, NOTE.G6] as const;
 const FINISH_NOTES = [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6] as const;
 const BURN_DETUNE_CENTS = [0, 28] as const;
+/** How long each reward cue keeps the engine/screech ducked, s. */
+const DUCK_HOLD: Partial<Record<GameEvent['type'], number>> = { coin: 0.12, chainBanked: 0.26 };
 
 const noop = (): void => {};
 
@@ -110,8 +113,11 @@ interface NoiseSpec {
 }
 
 export interface SfxPlayer {
-  /** Schedule the sound for `e` at context time `at`. Events without a sound are ignored. */
-  play(e: GameEvent, at: number): void;
+  /**
+   * Schedule the sound for `e` at context time `at`. Returns false when nothing was scheduled
+   * (events without a sound, voice cap reached).
+   */
+  play(e: GameEvent, at: number): boolean;
 }
 
 /** One-shot synthesizer writing into `out`. Exported separately for offline rendering checks. */
@@ -180,8 +186,8 @@ export function createSfxPlayer(
   }
 
   function coin(at: number): void {
-    tone({ type: 'square', hz: NOTE.B5, peak: 0.12, attack: 0.002, hold: 0.045, release: 0.03 }, at);
-    tone({ type: 'square', hz: NOTE.E6, peak: 0.12, attack: 0.002, hold: 0.05, release: 0.22 }, at + 0.07);
+    tone({ type: 'square', hz: NOTE.B5, peak: 0.15, attack: 0.002, hold: 0.045, release: 0.03 }, at);
+    tone({ type: 'square', hz: NOTE.E6, peak: 0.15, attack: 0.002, hold: 0.05, release: 0.22 }, at + 0.07);
   }
 
   /** Plastic toy body thump (pitch-dropping triangle) + crunchy band-passed noise, scaled by impact. */
@@ -194,13 +200,6 @@ export function createSfxPlayer(
 
   function scrape(at: number): void {
     hiss({ filter: 'bandpass', hz: 800 + 400 * Math.random(), q: 1.4, peak: 0.55, attack: 0.012, hold: 0.05, release: 0.12 }, at);
-  }
-
-  /** Rising minor thirds per multiplier step. */
-  function multiplier(value: number, at: number): void {
-    const step = Number.isFinite(value) ? clamp(value - 2, 0, 8) : 0;
-    const hz = NOTE.C6 * Math.pow(2, (step * 3) / 12);
-    tone({ type: 'triangle', hz, toHz: hz * 1.12, glide: 0.05, peak: 0.18, attack: 0.003, hold: 0.03, release: 0.1 }, at);
   }
 
   /** Deflating "bwaaow": two detuned saws gliding down through a closing lowpass. */
@@ -241,24 +240,25 @@ export function createSfxPlayer(
 
   return {
     play(e, at) {
-      if (active >= MAX_VOICES) return;
+      if (active >= MAX_VOICES) return false;
       switch (e.type) {
-        case 'countdown': return countdown(e.value, at);
-        case 'coin': return coin(at);
-        case 'hit': return hit(e.impactSpeed, at);
-        case 'scrape': return scrape(at);
-        case 'multiplier': return multiplier(e.value, at);
-        case 'chainBanked': return arpeggio(BANK_NOTES, at, 0.055, 'square', 0.12, 0.28);
-        case 'chainBurned': return burned(at);
-        case 'penalty': return penalty(at);
+        case 'countdown': countdown(e.value, at); return true;
+        case 'coin': coin(at); return true;
+        case 'hit': hit(e.impactSpeed, at); return true;
+        case 'scrape': scrape(at); return true;
+        case 'chainBanked': arpeggio(BANK_NOTES, at, 0.055, 'square', 0.12, 0.28); return true;
+        case 'chainBurned': burned(at); return true;
+        case 'penalty': penalty(at); return true;
         case 'lap':
           // The final lap is announced by the finish fanfare (same step).
-          if (e.lap < TUNING.race.laps) arpeggio(e.best ? BEST_LAP_NOTES : LAP_NOTES, at, 0.085, 'triangle', 0.2, 0.35);
-          return;
-        case 'finish': return finish(at);
+          if (e.lap >= TUNING.race.laps) return false;
+          arpeggio(e.best ? BEST_LAP_NOTES : LAP_NOTES, at, 0.085, 'triangle', 0.2, 0.35);
+          return true;
+        case 'finish': finish(at); return true;
         default:
-          // chainStart, propKnocked (penalty covers it), wrongWay, respawn: HUD/fx only.
-          return;
+          // chainStart, multiplier (not in the SFX list; the HUD shows it), propKnocked (penalty
+          // covers it), wrongWay, respawn: HUD/fx only.
+          return false;
       }
     },
   };
@@ -364,7 +364,9 @@ export function createAudio(factory: AudioContextFactory = defaultContextFactory
       const c = live();
       if (!c || !player || muted) return;
       try {
-        player.play(e, c.currentTime + LOOKAHEAD);
+        const at = c.currentTime + LOOKAHEAD;
+        const hold = DUCK_HOLD[e.type];
+        if (player.play(e, at) && hold !== undefined && engineOn && loops) loops.duck(at, hold);
       } catch (err) {
         disable(err);
       }
@@ -372,7 +374,8 @@ export function createAudio(factory: AudioContextFactory = defaultContextFactory
     setEngineActive(on) {
       engineOn = on;
       sinceParams = Infinity;
-      if (loops && ctx) loops.setActive(on, ctx.currentTime);
+      // Paused / suspended: the output is already silent and the clock may be frozen, so cut.
+      if (loops && ctx) loops.setActive(on, ctx.currentTime, paused || ctx.state !== 'running');
     },
   };
 }
