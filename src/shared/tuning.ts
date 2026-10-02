@@ -122,7 +122,8 @@ export const TUNING = {
     outOfBoundsMargin: 2,
   },
   pickups: {
-    coinRadius: 2.2,
+    /** Coin trigger radius, tested against the car CAPSULE (reach ≈ coinRadius + car.radius from the body axis). */
+    coinRadius: 1.4,
     canRadius: 0.5,
     cupRadius: 0.6,
     /** Fraction of speed lost when knocking a light prop. */

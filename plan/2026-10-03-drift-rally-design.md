@@ -47,7 +47,7 @@ Game keys call `preventDefault()` while racing. UI buttons are blurred when a ra
 - All timers use simulation time (fixed steps), never wall clock. Pause freezes everything.
 
 ### 2.5 Coins
-- ~30 coins per lap on the track (rows on the racing line, some in risky spots). Pickup radius 2.2 m from car centre.
+- ~30 coins per lap on the track (rows on the racing line, some in risky spots). Pickup: coin circle (r 1.4 m) overlapping the car capsule, i.e. ≈ 2.35 m reach from the body axis.
 - Coins and knocked light props reset at the start of each lap.
 - On finish: `earned = pickedCoins + floor(totalPoints / 1000)`; saved once on finish (quitting forfeits).
 
