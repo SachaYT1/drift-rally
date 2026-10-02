@@ -30,7 +30,10 @@ export interface SessionState {
   progress: ProgressState;
   score: DriftScoreState;
   pickups: PickupState;
-  /** Per-collider seconds until it may emit another hit/scrape event. */
+  /**
+   * Per-collider seconds until it may emit another 'scrape'. Every eligible contact and every heavy hit
+   * (re)starts it. Heavy hits ignore it: they always emit 'hit' (see contactEvent).
+   */
   hitCooldowns: Readonly<Record<string, number>>;
   bestLap: number | null;
   result: RaceResult | null;
@@ -219,6 +222,8 @@ function stepRacing(
     if (best) bestLap = e.lapTime;
     events.push({ ...e, best });
   }
+  // An item still touching the car here would re-trigger next step; track data keeps coins and light
+  // props out of reach of the start line (guarded in session.test.ts).
   if (pr.lapCompleted) pickups = resetLap(pickups);
   const justFinished = progress.finished && !s.progress.finished;
 
