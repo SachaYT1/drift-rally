@@ -115,7 +115,7 @@ const FATAL: Record<FatalKind, { icon: string; title: string; text: string; extr
   },
 };
 
-/** Replace everything with an error/notice screen. Idempotent per root. */
+/** Cover everything with an error/notice screen (topmost layer). Idempotent per root. */
 export function showFatal(root: HTMLElement, kind: FatalKind): void {
   root.querySelector(':scope > .dr-fatal')?.remove();
   const f = FATAL[kind];
