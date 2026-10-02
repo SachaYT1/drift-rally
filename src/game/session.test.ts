@@ -208,16 +208,21 @@ describe('session: countdown and teleports', () => {
     expect(sess.state()).toBe(before);
   });
 
-  it('teleported is true at the start and only on respawn steps afterwards', () => {
+  it('teleported holds through the countdown, clears on the first racing step and is set only by respawns', () => {
     const sess = createSession(track);
     expect(sess.state().teleported).toBe(true);
     const flags: boolean[] = [];
+    let goStep = -1;
     const steps = Math.round((TUNING.race.countdown + 3) / DT);
     for (let i = 0; i < steps; i++) {
-      sess.step(autopilot(sess), { respawn: i === steps - 10 }, DT);
+      const ev = sess.step(autopilot(sess), { respawn: i === steps - 10 }, DT);
+      if (ev.some((e) => e.type === 'countdown' && e.value === 0)) goStep = i;
       flags.push(sess.state().teleported);
     }
-    expect(flags.flatMap((f, i) => (f ? [i] : []))).toEqual([steps - 10]);
+    // A loop that runs its fixed steps before rendering still sees the start snap on any countdown frame.
+    expect(goStep).toBeGreaterThan(0);
+    expect(flags.slice(0, goStep + 1).every(Boolean)).toBe(true);
+    expect(flags.slice(goStep + 1).flatMap((f, i) => (f ? [goStep + 1 + i] : []))).toEqual([steps - 10]);
   });
 
   it('respawn interpolates from the marker pose and clears an active wrong-way in the same step', () => {
@@ -313,10 +318,47 @@ describe('session: collisions', () => {
     }
     throw new Error('the car never reached the posts');
   });
+
+  it('a heavy hit always emits a hit, even on a collider that is still cooling down', () => {
+    // A long cooldown makes the second ram land inside it; scrapes stay throttled, heavy hits do not.
+    const tuning = { ...TUNING, collision: { ...TUNING.collision, cooldown: 10 } };
+    const spawn = makeCircleTrack().spawnPose;
+    const post: Collider = {
+      kind: 'circle',
+      id: 'post',
+      x: spawn.x + Math.sin(spawn.heading) * 35,
+      z: spawn.z + Math.cos(spawn.heading) * 35,
+      r: 2,
+    };
+    const sess = createSession(makeCircleTrack(100, { walls: [post] }), { tuning });
+    runFor(sess, TUNING.race.countdown + 0.05, () => NEUTRAL_INPUT);
+    // Ram the post, reverse away, ram it again.
+    let firstHitAt = -1;
+    const hits: { cooling: number; graceRestarted: boolean }[] = [];
+    let heavySteps = 0;
+    for (let i = 0; i < 12 / DT && hits.length < 2; i++) {
+      const prev = sess.state();
+      const backing = firstHitAt >= 0 && prev.time - firstHitAt < 2.5;
+      const ev = sess.step(backing ? { ...NEUTRAL_INPUT, brake: 1 } : FULL_THROTTLE, { respawn: false }, DT);
+      const st = sess.state();
+      const graceRestarted = st.progress.graceTimer > prev.progress.graceTimer;
+      if (graceRestarted) heavySteps++;
+      if (!ev.some((e) => e.type === 'hit')) continue;
+      if (firstHitAt < 0) firstHitAt = st.time;
+      hits.push({ cooling: prev.hitCooldowns.post ?? 0, graceRestarted });
+      expect(st.hitCooldowns.post).toBe(tuning.collision.cooldown);
+    }
+    expect(hits).toHaveLength(2);
+    expect(hits[1].cooling).toBeGreaterThan(1);
+    expect(hits.every((h) => h.graceRestarted)).toBe(true);
+    // Every heavy contact (grace restart) came with its hit event.
+    expect(heavySteps).toBe(2);
+  });
 });
 
 describe('session: laps and result', () => {
-  it('reports consistent result maths, banks the last chain and freezes after the finish', () => {
+  // The finish bank, burns and prop penalties are covered deterministically in session.drift.test.ts.
+  it('reports consistent result maths and freezes after the finish', () => {
     const sess = createSession(track, { laps: 1 });
     const events = race(sess);
     const st = sess.state();
@@ -334,12 +376,22 @@ describe('session: laps and result', () => {
     expect(r.coinsFromDrift).toBe(Math.floor(r.totalPoints / TUNING.score.pointsPerCoin));
     expect(r.coinsEarned).toBe(r.coinsPicked + r.coinsFromDrift);
     expect(r.totalPoints).toBeGreaterThan(0);
-    // Finish banks the open chain; no zero-point banks reach the HUD.
-    expect(st.score.phase).toBe('idle');
-    expect(events.filter((e) => e.type === 'chainBanked' && e.points <= 0)).toEqual([]);
+    // The result owns its lap times: sorting them cannot reach into the frozen progress state.
+    expect(r.lapTimes).not.toBe(st.progress.lapTimes);
+    expect(r.lapTimes).toEqual(st.progress.lapTimes);
 
     expect(sess.step(FULL_THROTTLE, { respawn: true }, DT)).toEqual([]);
     expect(sess.state()).toBe(st);
+  });
+
+  it('sanitises the lap count: floors it, keeps at least 1, defaults when not finite', () => {
+    const laps = (n: number) => createSession(track, { laps: n }).state().laps;
+    expect(laps(2.7)).toBe(2);
+    expect(laps(0)).toBe(1);
+    expect(laps(-3)).toBe(1);
+    expect(laps(Number.NaN)).toBe(TUNING.race.laps);
+    expect(laps(Infinity)).toBe(TUNING.race.laps);
+    expect(createSession(track).state().laps).toBe(TUNING.race.laps);
   });
 
   it('flags a lap as best only when it beats earlier laps and the seeded record', () => {

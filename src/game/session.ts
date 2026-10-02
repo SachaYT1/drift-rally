@@ -20,7 +20,11 @@ export interface SessionState {
   car: CarState;
   /** Car state before the latest step (for render interpolation). */
   prevCar: CarState;
-  /** True for the step right after a teleport (respawn/start): renderers must snap. */
+  /**
+   * Renderers must snap car and camera while this is true. It holds from creation through the whole
+   * countdown (the car sits frozen at the start pose, so a loop that steps before rendering still sees
+   * the start teleport), is cleared by the first racing step, and is set again only on a respawn step.
+   */
   teleported: boolean;
   surface: SurfaceKind;
   progress: ProgressState;
@@ -70,9 +74,11 @@ export function createSession(
   opts: { laps?: number; bestLap?: number | null; tuning?: Tuning } = {},
 ): Session {
   const t = opts.tuning ?? TUNING;
+  // A non-finite lap count (NaN, Infinity) would never finish: fall back to the tuning default.
+  const laps = opts.laps ?? t.race.laps;
   const cfg: SessionConfig = {
     track,
-    laps: Math.max(1, Math.floor(opts.laps ?? t.race.laps)),
+    laps: Math.max(1, Math.floor(Number.isFinite(laps) ? laps : t.race.laps)),
     countdown: Math.max(0, t.race.countdown),
     t,
   };
@@ -104,7 +110,7 @@ function initialState(cfg: SessionConfig, bestLap: number | null): SessionState 
     laps: cfg.laps,
     car,
     prevCar: car,
-    // The race start is a teleport: the first rendered frame snaps car and camera.
+    // The race start is a teleport; the countdown keeps the flag set (see SessionState.teleported).
     teleported: true,
     surface: track.surfaceAt(progress.lateral),
     progress,
@@ -129,7 +135,10 @@ function pushCountdown(events: GameEvent[], tick: number): void {
   if (tick === 3 || tick === 2 || tick === 1 || tick === 0) events.push({ type: 'countdown', value: tick });
 }
 
-/** 3 on the first step, 2 and 1 as the whole second drops, 0 at GO. The car is frozen, input ignored. */
+/**
+ * 3 on the first step, 2 and 1 as the whole second drops, 0 at GO. The car is frozen, input ignored,
+ * and `teleported` stays true (the start snap); the first racing step clears it.
+ */
 function stepCountdown(s: SessionState, cfg: SessionConfig, dt: number): StepResult {
   const events: GameEvent[] = [];
   const before = s.countdownLeft;
@@ -139,10 +148,10 @@ function stepCountdown(s: SessionState, cfg: SessionConfig, dt: number): StepRes
 
   if (left <= TIME_EPSILON) {
     pushCountdown(events, 0);
-    return { state: { ...s, phase: 'racing', countdownLeft: 0, prevCar: s.car, teleported: false }, events };
+    return { state: { ...s, phase: 'racing', countdownLeft: 0, prevCar: s.car, teleported: true }, events };
   }
   if (countdownTick(left) < countdownTick(before)) pushCountdown(events, countdownTick(left));
-  return { state: { ...s, countdownLeft: left, prevCar: s.car, teleported: false }, events };
+  return { state: { ...s, countdownLeft: left, prevCar: s.car, teleported: true }, events };
 }
 
 // ---------------------------------------------------------------------------
@@ -180,11 +189,12 @@ function stepRacing(
   // 2. Car physics on the surface under the car.
   car = stepCar(car, input, track.surfaceAt(progress.lateral), dt, t);
 
-  // 3. Collisions: at most one hit/scrape event per step, per-collider cooldowns.
+  // 3. Collisions: at most one hit/scrape event per step; per-collider cooldowns throttle scrapes,
+  //    while a heavy hit always reports (it burns the chain and starts the wrong-way grace below).
   const reach = t.car.capsuleHalf + t.car.radius + COLLIDER_QUERY_MARGIN;
   const col = resolveCollisions(car, track.collidersNear(car.x, car.z, reach), t);
   car = col.state;
-  const contact = contactEvent(col.contacts, tickCooldowns(s.hitCooldowns, dt), t);
+  const contact = contactEvent(col.contacts, col.heavyHit, tickCooldowns(s.hitCooldowns, dt), t);
   if (contact.event) events.push(contact.event);
   const heavyHit = col.heavyHit !== null;
   if (heavyHit) progress = startGrace(progress, t);
@@ -232,8 +242,8 @@ function stepRacing(
     dt,
     t,
   );
-  // A chain can bank 0 points (e.g. a single accruing step); that is not worth a HUD flash.
-  events.push(...ds.events.filter((e) => !(e.type === 'chainBanked' && e.points <= 0)));
+  // Passed through unfiltered: a chain can bank (or burn) 0 points; consumers decide what to show.
+  events.push(...ds.events);
 
   const next: SessionState = {
     ...s,
@@ -276,12 +286,16 @@ function tickCooldowns(cooldowns: Readonly<Record<string, number>>, dt: number):
 }
 
 /**
- * The strongest contact whose collider is not cooling down becomes this step's single 'hit'
- * (impact >= heavyImpact) or 'scrape' event; every eligible contact of the step starts its cooldown,
- * so a multi-collider crash reports once. Ties keep the deepest contact (contacts arrive deepest first).
+ * This step's single contact event (a multi-collider crash reports once):
+ * - a heavy hit (`resolveCollisions().heavyHit`, the strongest contact) is always a 'hit', even when its
+ *   collider is cooling down, because it burns the chain and starts recovery: the player must see why;
+ * - otherwise the strongest contact whose collider is not cooling down is a 'scrape'.
+ * Every eligible contact of the step starts its cooldown, and a heavy hit restarts its collider's.
+ * Ties keep the deepest contact (contacts arrive deepest first). `cooldowns` is a fresh object (mutated).
  */
 function contactEvent(
   contacts: readonly Contact[],
+  heavyHit: Contact | null,
   cooldowns: Record<string, number>,
   t: Tuning,
 ): { event: GameEvent | null; cooldowns: Readonly<Record<string, number>> } {
@@ -291,17 +305,18 @@ function contactEvent(
     if (!strongest || c.impactSpeed > strongest.impactSpeed) strongest = c;
     cooldowns[c.colliderId] = t.collision.cooldown;
   }
+  if (heavyHit) {
+    cooldowns[heavyHit.colliderId] = t.collision.cooldown;
+    return { event: { type: 'hit', impactSpeed: heavyHit.impactSpeed, x: heavyHit.x, z: heavyHit.z }, cooldowns };
+  }
   if (!strongest) return { event: null, cooldowns };
-  const event: GameEvent =
-    strongest.impactSpeed >= t.collision.heavyImpact
-      ? { type: 'hit', impactSpeed: strongest.impactSpeed, x: strongest.x, z: strongest.z }
-      : { type: 'scrape', x: strongest.x, z: strongest.z };
-  return { event, cooldowns };
+  return { event: { type: 'scrape', x: strongest.x, z: strongest.z }, cooldowns };
 }
 
 function raceResult(s: SessionState, t: Tuning): RaceResult {
   const totalPoints = s.score.totalPoints;
-  const lapTimes = s.progress.lapTimes;
+  // A copy: consumers that sort or edit the result must not reach into the frozen progress state.
+  const lapTimes = [...s.progress.lapTimes];
   const coinsPicked = s.pickups.coinsPicked;
   const coinsFromDrift = Math.floor(totalPoints / t.score.pointsPerCoin);
   return {
