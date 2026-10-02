@@ -113,8 +113,9 @@ function respond(s: CarState, o: Overlap, colliderId: string, t: Tuning): { stat
     mode: 'recover',
     modeTimer: t.drift.recoverTime,
     driftDir: 0,
-    // Leaving a drift: lateral grip blends back in (same rule as a normal drift exit).
-    gripBlend: s.mode === 'drift' ? 0 : s.gripBlend,
+    // Leaving a drift through a hit resets the same fields as a normal drift exit (car.ts
+    // exitDrift): the drift clock restarts and lateral grip blends back in (no jolt).
+    ...(s.mode === 'drift' ? { driftTime: 0, gripBlend: 0 } : {}),
   };
   return { state, contact };
 }
@@ -198,6 +199,7 @@ function fallbackNormal(cap: Capsule, seg: Segment, ox: number, oz: number): [nu
  * One-sided wall: penetration = r - (minimum signed distance of the capsule segment to the
  * wall line), counting only the part of the segment whose projection lies within the wall
  * extent widened by r. The push is always +n (toward the track), even from behind the wall.
+ * The contact point is the deepest car-axis point projected onto the wall line.
  */
 function overlapWall(cap: Capsule, w: WallCollider): Overlap | null {
   const wx = w.bx - w.ax;
@@ -217,14 +219,18 @@ function overlapWall(cap: Capsule, w: WallCollider): Overlap | null {
   const range = clipLinear(tA, tB, -margin, 1 + margin);
   if (!range) return null;
 
-  // The minimum of a linear function sits at an end of the range; parallel -> use the middle.
+  // The minimum of a linear function sits at an end of the range. A car parallel to the wall
+  // touches along its whole flat side: act at the car centre (no yaw kick).
   const [s0, s1] = range;
   const d0 = dA + (dB - dA) * s0;
   const d1 = dA + (dB - dA) * s1;
-  const s = Math.abs(d0 - d1) <= EPS ? (s0 + s1) / 2 : d0 < d1 ? s0 : s1;
+  const s = Math.abs(d0 - d1) <= EPS ? 0.5 : d0 < d1 ? s0 : s1;
   const pen = cap.r - Math.min(d0, d1);
   if (!(pen > EPS)) return null;
-  const tw = clamp(tA + (tB - tA) * s, 0, 1);
+  // Contact: that car point projected onto the wall LINE, deliberately not clamped to the segment.
+  // Within the widened extent it lies on the neighbouring segment of the barrier polyline, so every
+  // collinear segment reports the same point and the yaw lever does not depend on collider order.
+  const tw = tA + (tB - tA) * s;
   return { pen, nx, nz, x: w.ax + wx * tw, z: w.az + wz * tw };
 }
 
