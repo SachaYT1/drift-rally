@@ -5,23 +5,27 @@
  * maxStepsPerFrame, excess time is dropped), then render with the interpolation factor
  * alpha = leftover / stepDt in [0, 1). While paused nothing runs: simulation time is frozen
  * and the canvas keeps its last frame (the app re-renders explicitly when needed, e.g. on resize).
- * pause() or stop() called from inside step() ends the current frame at once: the remaining
- * sub-steps are dropped and that frame is not rendered.
+ * pause() or stop() called from inside step() ends the current frame early: the remaining sub-steps
+ * and the leftover time are dropped, but the frame is still rendered once (alpha 0), so the state
+ * and the events produced by its steps reach the screen, HUD and audio in that same frame.
+ * start() always begins an unpaused run; a pause() made while stopped does not carry over.
  * Pure: no three.js, no DOM access unless the default rAF/clock are used.
  */
 
 export interface FixedLoop {
   /**
-   * requestAnimationFrame-driven. Begins a fresh run (clock and accumulator reset); no-op when
-   * already running. The run starts unpaused, except that a pause() requested while the loop was
-   * not running survives start() (until resume()).
+   * requestAnimationFrame-driven. Begins a fresh, unpaused run (clock and accumulator reset), even
+   * if pause() was called while stopped; no-op when already running.
    */
   start(): void;
-  /** Cancels the pending frame. From inside step() it also ends the current advance(). */
+  /** Cancels the pending frame. From inside step() it also ends the current frame early. */
   stop(): void;
-  /** Freezes simulation time. From inside step() it also ends the current advance(). */
+  /**
+   * Freezes simulation time. From inside step() it also ends the current frame early. While stopped
+   * it only blocks a directly driven advance(); the next start() clears it.
+   */
   pause(): void;
-  /** Resets last-time and accumulator (no lurch); also clears a pause requested before start(). */
+  /** Resets last-time and accumulator (no lurch). */
   resume(): void;
   readonly paused: boolean;
   /** Run the accumulator for one frame of length frameDt (used by rAF and by tests/test-hook). */
@@ -56,8 +60,6 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
 
   let accumulator = 0;
   let paused = false;
-  /** pause() was requested while not running: the next start() keeps the loop paused. */
-  let pauseBeforeStart = false;
   let running = false;
   /** Bumped by start() and stop(), so an advance() in progress notices a stop from inside step(). */
   let generation = 0;
@@ -77,9 +79,10 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
       accumulator = Math.max(0, accumulator - stepDt);
       steps++;
       if (paused || gen !== generation) {
-        // pause() / stop() from inside step(): drop the rest of this frame, render nothing.
+        // pause() / stop() from inside step(): drop the remaining sub-steps and the leftover time,
+        // then still render (alpha 0) so this frame's state and events are not deferred.
         accumulator = 0;
-        return steps;
+        break;
       }
     }
     // Step cap hit: drop the whole steps we could not run (avoids the spiral of death).
@@ -102,8 +105,7 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
     start(): void {
       if (running) return;
       running = true;
-      paused = pauseBeforeStart;
-      pauseBeforeStart = false;
+      paused = false;
       generation++;
       accumulator = 0;
       lastTime = null;
@@ -118,11 +120,9 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
     },
     pause(): void {
       paused = true;
-      if (!running) pauseBeforeStart = true;
     },
     resume(): void {
       paused = false;
-      pauseBeforeStart = false;
       accumulator = 0;
       lastTime = null;
     },

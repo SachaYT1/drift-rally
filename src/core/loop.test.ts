@@ -164,21 +164,22 @@ describe('fixed loop control from inside step()', () => {
     };
   }
 
-  it('pause() inside step() skips the remaining sub-steps and the render of that frame', () => {
+  it('pause() inside step() skips the remaining sub-steps and leftover time but still renders that frame', () => {
     const { loop, steps, renders } = makeControlled((l, i) => { if (i === 1) l.pause(); });
-    expect(loop.advance(5 * STEP)).toBe(1);
+    expect(loop.advance(5.5 * STEP)).toBe(1);
     expect(steps).toHaveLength(1);
-    expect(renders).toHaveLength(0);
+    // Rendered once with alpha 0: the 4.5 unrun steps were dropped, not carried as alpha 0.5.
+    expect(renders).toEqual([0]);
     expect(loop.paused).toBe(true);
     expect(loop.advance(5 * STEP)).toBe(0);
+    expect(renders).toHaveLength(1);
     loop.resume();
-    // The dropped frame time does not come back after resume.
     expect(loop.advance(2 * STEP)).toBe(2);
     expect(steps).toHaveLength(3);
-    expect(renders).toHaveLength(1);
+    expect(renders).toHaveLength(2);
   });
 
-  it('stop() inside step() skips the remaining sub-steps and schedules no further frame', () => {
+  it('stop() inside step() skips the remaining sub-steps, renders that frame and schedules no further frame', () => {
     const f = fakeFrames();
     const { loop, steps, renders } = makeControlled((l, i) => { if (i === 2) l.stop(); }, f);
     loop.start();
@@ -186,42 +187,36 @@ describe('fixed loop control from inside step()', () => {
     expect(renders).toHaveLength(1);
     f.frame(1000 * 5 * STEP);
     expect(steps).toHaveLength(2);
-    expect(renders).toHaveLength(1);
+    expect(renders).toEqual([0, 0]);
     expect(f.scheduled).toBe(false);
   });
 
-  it('stop() inside a directly driven advance() also ends that frame', () => {
+  it('stop() inside a directly driven advance() also ends that frame and drops its leftover time', () => {
     const { loop, steps, renders } = makeControlled((l, i) => { if (i === 1) l.stop(); });
-    expect(loop.advance(4 * STEP)).toBe(1);
-    expect(renders).toHaveLength(0);
-    // The leftover time of the aborted frame is dropped.
+    expect(loop.advance(4.5 * STEP)).toBe(1);
+    expect(renders).toEqual([0]);
+    // Had the 3.5 unrun steps been kept, this frame would run 3 more steps.
     expect(loop.advance(STEP / 2)).toBe(0);
     expect(steps).toHaveLength(1);
+    expect(renders[1]).toBeCloseTo(0.5, 9);
   });
 
-  it('a pause() requested before start() survives start() until resume()', () => {
+  it('start() begins unpaused even after a pause() while stopped (finish, blur on results, retry)', () => {
     const f = fakeFrames();
-    const { loop, steps } = makeControlled(() => {}, f);
-    loop.pause();
+    const { loop, steps, renders } = makeControlled((l, i) => { if (i === 2) l.stop(); }, f);
     loop.start();
-    expect(loop.paused).toBe(true);
     f.frame(0);
-    f.frame(1000);
-    expect(steps).toHaveLength(0);
-    loop.resume();
-    expect(loop.paused).toBe(false);
-    f.frame(2000); // first frame after resume only re-establishes the timeline
-    expect(steps).toHaveLength(0);
-    f.frame(2000 + 1000 * 2 * STEP);
+    f.frame(1000 * 4 * STEP); // the finish calls stop() inside the 2nd step
     expect(steps).toHaveLength(2);
-  });
-
-  it('resume() before start() cancels the pending pause', () => {
-    const f = fakeFrames();
-    const { loop } = makeControlled(() => {}, f);
-    loop.pause();
-    loop.resume();
-    loop.start();
+    loop.pause(); // window blur while the results screen is up
+    expect(loop.paused).toBe(true);
+    expect(loop.advance(STEP)).toBe(0);
+    loop.start(); // retry
     expect(loop.paused).toBe(false);
+    const rendered = renders.length;
+    f.frame(10_000);
+    f.frame(10_000 + 1000 * 2 * STEP);
+    expect(steps).toHaveLength(4);
+    expect(renders).toHaveLength(rendered + 2);
   });
 });

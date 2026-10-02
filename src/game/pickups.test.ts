@@ -145,6 +145,20 @@ describe('pickups edge cases', () => {
     expect(updatePickups(createPickups(), farCoin, movingCar()).state.coinsPicked).toBe(0);
   });
 
+  it('nearRadius only prunes the broad phase: shrinking or growing it changes no result', () => {
+    const spots = makeCircleTrack(100, {
+      coins: [{ id: 0, x: 0, z: 3.05 }, { id: 1, x: 2.3, z: 0 }, { id: 2, x: 0, z: 6 }, { id: 3, x: 20, z: 0 }],
+      lightProps: [{ id: 'can-1', kind: 'can', x: 0, z: -2, r: TUNING.pickups.canRadius, heading: 0 }],
+    });
+    const base = updatePickups(createPickups(), spots, movingCar());
+    expect(base.state.coinsPicked).toBe(2);
+    expect(base.knocked).toBe(1);
+    for (const nearRadius of [0, 1e6]) {
+      const t = { ...TUNING, pickups: { ...TUNING.pickups, nearRadius } };
+      expect(updatePickups(createPickups(), spots, movingCar(), t)).toEqual(base);
+    }
+  });
+
   it('collects nothing and does not throw for a non-finite car', () => {
     const res = updatePickups(createPickups(), track, { ...movingCar(), x: Number.NaN });
     expect(res.events).toEqual([]);

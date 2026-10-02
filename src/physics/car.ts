@@ -41,6 +41,9 @@ interface Motion {
 
 type Derived = Pick<CarState, 'speed' | 'forwardSpeed' | 'lateralSpeed' | 'slip'>;
 
+/** m/s; below this the velocity direction is noise, so slip is 0 whatever car.slipMinSpeed says. */
+const SLIP_SPEED_EPSILON = 1e-6;
+
 export function createCarState(x: number, z: number, heading: number): CarState {
   return {
     x,
@@ -57,6 +60,7 @@ export function createCarState(x: number, z: number, heading: number): CarState 
     modeTimer: 0,
     reverseHold: 0,
     wheelSpin: 0,
+    // At rest: every derived field is 0 for any tuning, so the global TUNING is fine here.
     ...derive(heading, 0, 0, TUNING),
     rpm: 0,
   };
@@ -157,14 +161,13 @@ function makeContext(s: CarState, input: InputFrame, surface: SurfaceKind, dt: n
     Math.abs(steerInput) > Math.abs(s.steer) && (s.steer === 0 || Math.sign(steerInput) === Math.sign(s.steer));
   const steer = approach(s.steer, steerInput, (rising ? t.car.steerRiseRate : t.car.steerReturnRate) * dt);
 
-  const speed = Math.hypot(s.vx, s.vz);
-  const phi = Math.atan2(s.vx, s.vz);
+  const d = derive(h, s.vx, s.vz, t);
   return {
     h,
-    speed,
-    vf: s.vx * Math.sin(h) + s.vz * Math.cos(h),
-    phi,
-    slip: speed < t.car.slipMinSpeed ? 0 : wrapAngle(h - phi),
+    speed: d.speed,
+    vf: d.forwardSpeed,
+    phi: Math.atan2(s.vx, s.vz),
+    slip: d.slip,
     steerInput,
     steer,
     throttle: clamp(input.throttle, 0, 1),
@@ -336,7 +339,12 @@ function capDriftSpeed(speed: number, raw: number, cap: number, c: StepContext):
   return Math.min(raw, Math.max(cap, speed - c.t.drift.overspeedDecel * c.dt));
 }
 
-/** Kinematic fields derived from heading and velocity; the single source for every module. */
+/**
+ * Kinematic fields derived from heading and velocity; the single source for every module (stepCar's
+ * context, its result, withDerived, the defensive fallback). Slip is 0 below car.slipMinSpeed, and
+ * always below SLIP_SPEED_EPSILON: a live-edited threshold of 0 must not turn atan2(0, 0) into a
+ * slip equal to the heading for a car at rest.
+ */
 function derive(heading: number, vx: number, vz: number, t: Tuning): Derived {
   const speed = Math.hypot(vx, vz);
   const fx = Math.sin(heading);
@@ -345,7 +353,7 @@ function derive(heading: number, vx: number, vz: number, t: Tuning): Derived {
     speed,
     forwardSpeed: vx * fx + vz * fz,
     lateralSpeed: vx * fz - vz * fx,
-    slip: speed < t.car.slipMinSpeed ? 0 : wrapAngle(heading - Math.atan2(vx, vz)),
+    slip: speed < Math.max(t.car.slipMinSpeed, SLIP_SPEED_EPSILON) ? 0 : wrapAngle(heading - Math.atan2(vx, vz)),
   };
 }
 
