@@ -119,7 +119,9 @@ export function createGarageUI(
   const navButtons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.dr-nav__item'));
 
   let save = opts.save;
-  let modal: { kind: ModalKind; el: HTMLElement; body: HTMLElement; opener: HTMLElement | null } | null = null;
+  let started = false;
+  /** `refocus`: the modal was opened from the keyboard, so focus goes back to its opener on close. */
+  let modal: { kind: ModalKind; el: HTMLElement; body: HTMLElement; opener: HTMLElement; refocus: boolean } | null = null;
 
   function render(prevCoins: number | null): void {
     walletN.textContent = formatPoints(save.coins);
@@ -128,16 +130,25 @@ export function createGarageUI(
     if (modal?.kind === 'records') modal.body.innerHTML = recordsHtml(save);
   }
 
+  /** Drop focus from any garage control so a page-level Enter reaches the start handler. */
+  function blurInside(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && layer.contains(active)) active.blur();
+  }
+
   function closeModal(): void {
     if (!modal) return;
-    const { el, opener } = modal;
+    const { el, opener, refocus } = modal;
     modal = null;
     el.remove();
     for (const b of navButtons) b.classList.remove('is-open');
-    opener?.focus({ preventScroll: true });
+    // Only keyboard users get focus back on the nav button: for a mouse user a focused nav button
+    // would swallow the next Enter (re-opening the modal) instead of starting the race.
+    if (refocus) opener.focus({ preventScroll: true });
+    else blurInside();
   }
 
-  function openModal(kind: ModalKind, opener: HTMLElement | null): void {
+  function openModal(kind: ModalKind, opener: HTMLElement, refocus: boolean): void {
     closeModal();
     const el = document.createElement('div');
     el.className = 'dr-modal';
@@ -148,24 +159,30 @@ export function createGarageUI(
     const body = qs(el, '.dr-modal__body');
     body.innerHTML = kind === 'rules' ? rulesHtml() : recordsHtml(save);
     layer.appendChild(el);
-    modal = { kind, el, body, opener };
-    opener?.classList.add('is-open');
+    modal = { kind, el, body, opener, refocus };
+    opener.classList.add('is-open');
     el.addEventListener('click', (e) => {
       if (e.target instanceof Element && e.target.closest('[data-close]')) closeModal();
     });
     qs(el, '.dr-close').focus({ preventScroll: true });
   }
 
+  /** One-shot: a double click or two quick Enters must not start two races before destroy(). */
   function start(): void {
     closeModal();
-    cta.blur();
+    blurInside(); // also on repeats: a second click re-focuses the CTA on mousedown
+    if (started) return;
+    started = true;
     opts.onStart();
   }
 
   const onNav = (e: MouseEvent): void => {
     const btn = e.currentTarget as HTMLButtonElement;
     const kind = btn.dataset.open;
-    if (kind === 'rules' || kind === 'records') openModal(kind, btn);
+    // detail === 0: activated from the keyboard (Enter/Space), not by a pointer click.
+    const fromKeyboard = e.detail === 0;
+    if (!fromKeyboard) btn.blur();
+    if (kind === 'rules' || kind === 'records') openModal(kind, btn, fromKeyboard);
     else closeModal();
   };
   for (const b of navButtons) b.addEventListener('click', onNav);

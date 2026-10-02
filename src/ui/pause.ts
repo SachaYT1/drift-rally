@@ -11,6 +11,9 @@ export interface PauseMenu {
   destroy(): void;
 }
 
+/** Set on the UI root while paused; styles.css pauses HUD CSS animations under it. */
+const PAUSED_CLASS = 'dr-paused';
+
 const QUALITY_LABELS: readonly [QualityLevel, string][] = [
   ['low', 'Низкое'],
   ['medium', 'Среднее'],
@@ -60,6 +63,29 @@ export function createPauseMenu(
   let quality = h.quality;
   let muted = h.muted;
   let visible = false;
+  let frozen: Animation[] = [];
+
+  /**
+   * Pause freezes everything (spec §2.4), including UI motion tied to race time such as the chain
+   * grace drain bar: CSS animations via PAUSED_CLASS, Web Animations (flashes, toasts, countdown)
+   * via pause()/play(). The pause menu's own animations are left alone.
+   */
+  function freezeAnimations(): void {
+    root.classList.add(PAUSED_CLASS);
+    if (typeof root.getAnimations !== 'function') return;
+    frozen = root.getAnimations({ subtree: true }).filter((a) => {
+      const target = a.effect instanceof KeyframeEffect ? a.effect.target : null;
+      return a.playState === 'running' && !(target !== null && layer.contains(target));
+    });
+    for (const a of frozen) a.pause();
+  }
+
+  function thawAnimations(): void {
+    root.classList.remove(PAUSED_CLASS);
+    // Animations cancelled meanwhile (element removed, e.g. HUD destroyed on restart) are skipped.
+    for (const a of frozen) if (a.playState === 'paused') a.play();
+    frozen = [];
+  }
 
   function renderSettings(): void {
     for (const b of qualityButtons) b.setAttribute('aria-pressed', String(b.dataset.quality === quality));
@@ -70,6 +96,7 @@ export function createPauseMenu(
     if (!visible) return;
     visible = false;
     layer.hidden = true;
+    thawAnimations();
     // Buttons must not keep focus once racing resumes (Space would "click" them).
     if (document.activeElement instanceof HTMLElement && layer.contains(document.activeElement)) {
       document.activeElement.blur();
@@ -116,6 +143,7 @@ export function createPauseMenu(
     show(): void {
       if (visible) return;
       visible = true;
+      freezeAnimations();
       renderSettings();
       layer.hidden = false;
     },
@@ -129,6 +157,7 @@ export function createPauseMenu(
       renderSettings();
     },
     destroy(): void {
+      hide();
       layer.removeEventListener('click', onClick);
       layer.remove();
     },

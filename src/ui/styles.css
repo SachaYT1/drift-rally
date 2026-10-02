@@ -199,6 +199,8 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-toggle[aria-checked='true'] { background: var(--dr-coral); border-color: var(--dr-coral); }
 .dr-toggle[aria-checked='true']::after { transform: translateX(1.4em); background: #fff; }
 .dr-setting .dr-key { margin-left: 0.5em; }
+/* Race time stops while paused, so HUD motion stops too (pause.ts also pauses Web Animations). */
+.dr-paused .dr-hud * { animation-play-state: paused; }
 
 /* ---------- results ---------- */
 .dr-results { display: grid; place-items: center; z-index: 6; }

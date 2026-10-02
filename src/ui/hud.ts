@@ -205,9 +205,12 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
     // Accept raw seconds-left too: show whole numbers only, 0 = GO.
     const v = value === null || !Number.isFinite(value) ? null : Math.max(0, Math.ceil(value));
     if (v === shown.countdown) return;
+    const prev = shown.countdown;
     shown.countdown = v;
     if (v === null) {
-      play(el.countBox, HIDE, { duration: 1 });
+      // «Старт!» fades out on its own (its keyframes end at opacity 0); cutting it here would hide GO
+      // whenever the app clears the countdown on the same step that emits 0.
+      if (prev !== 0) play(el.countBox, HIDE, { duration: 1 });
       return;
     }
     const go = v === 0;
@@ -298,7 +301,12 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
         break;
       case 'lap':
         if (e.lap >= laps) break; // the finish toast covers the last lap
-        toast(e.lap + 1 === laps ? 'Последний круг' : `Круг ${e.lap + 1}/${laps}`, formatTime(e.lapTime), e.best);
+        // `best` is vacuously true for the first lap (nothing to beat), so only flag it from lap 2 on.
+        toast(
+          e.lap + 1 === laps ? 'Последний круг' : `Круг ${e.lap + 1}/${laps}`,
+          formatTime(e.lapTime),
+          e.best && e.lap > 1,
+        );
         break;
       case 'wrongWay':
         setWrong(e.active);

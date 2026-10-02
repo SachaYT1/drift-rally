@@ -148,26 +148,41 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Resolve once the UI faces are loaded (or after a timeout — the game must never hang on fonts).
- * The @font-face rules arrive with styles.css, which may still be in flight in production builds,
- * so an empty match is retried until the deadline.
+ * Resolve once the UI faces are loaded, or after FONT_TIMEOUT_MS at the latest: the game must never
+ * hang on fonts. The @font-face rules arrive with styles.css, which may still be in flight in
+ * production builds, so an empty match is retried. A stalled font request is cut off by racing the
+ * whole load against a timer (the deadline alone is only checked between attempts).
  */
 export async function fontsReady(): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts) return;
   const fonts = document.fonts;
   const deadline = Date.now() + FONT_TIMEOUT_MS;
+  const missing: string[] = [];
   const loadOne = async (spec: string): Promise<void> => {
     while (Date.now() < deadline) {
       const faces = await fonts.load(spec, FONT_SAMPLE);
       if (faces.length > 0) return;
       await sleep(FONT_RETRY_MS);
     }
-    console.warn(`Font not available, using fallback: ${spec}`);
+    missing.push(spec);
   };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), FONT_TIMEOUT_MS);
+  });
   try {
-    await Promise.all(FONT_SPECS.map(loadOne));
+    // Promise.race keeps a handler on the load promise, so a late rejection is not unhandled.
+    const loaded = Promise.all(FONT_SPECS.map(loadOne)).then(() => 'loaded' as const);
+    const outcome = await Promise.race([loaded, timeout]);
+    if (outcome === 'timeout') {
+      console.warn(`Fonts still loading after ${FONT_TIMEOUT_MS} ms, continuing with fallback fonts`);
+    } else if (missing.length > 0) {
+      console.warn(`Fonts not available, using fallback: ${missing.join(', ')}`);
+    }
   } catch (err) {
     console.warn('Font loading failed, using fallback fonts', err);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
