@@ -33,12 +33,6 @@ export interface ChaseCamera {
   readonly target: THREE.Vector3;
 }
 
-/** Shake jitter angular frequencies, rad/s (incommensurate so the pattern does not repeat visibly). */
-const SHAKE_FREQ_X = 37;
-const SHAKE_FREQ_Y = 43;
-const SHAKE_FREQ_Z = 29;
-/** Vertical shake is damped relative to horizontal. */
-const SHAKE_Y_SCALE = 0.6;
 /** Shake amplitude below which it is treated as finished, metres. */
 const SHAKE_EPSILON = 1e-4;
 /** Minimum FOV change (degrees) worth a projection-matrix rebuild. */
@@ -109,9 +103,9 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera, t: Tuning = T
     let sy = 0;
     let sz = 0;
     if (shakeAmp > 0) {
-      sx = shakeAmp * Math.sin(shakeTime * SHAKE_FREQ_X);
-      sy = shakeAmp * SHAKE_Y_SCALE * Math.sin(shakeTime * SHAKE_FREQ_Y + 1.3);
-      sz = shakeAmp * Math.sin(shakeTime * SHAKE_FREQ_Z + 2.1);
+      sx = shakeAmp * Math.sin(shakeTime * c.shakeFreqX);
+      sy = shakeAmp * c.shakeYScale * Math.sin(shakeTime * c.shakeFreqY + 1.3);
+      sz = shakeAmp * Math.sin(shakeTime * c.shakeFreqZ + 2.1);
     }
     camera.position.set(
       car.x - Math.sin(yaw) * dist + sx,
@@ -158,8 +152,10 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera, t: Tuning = T
   }
 
   function shake(amount: number): void {
-    if (!Number.isFinite(amount) || amount <= shakeAmp) return;
-    shakeAmp = amount;
+    if (!Number.isFinite(amount)) return;
+    const capped = Math.min(amount, t.camera.shakeMax);
+    if (capped <= shakeAmp) return;
+    shakeAmp = capped;
   }
 
   return { update, snap, shake, target };

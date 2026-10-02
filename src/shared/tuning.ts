@@ -173,8 +173,9 @@ export const TUNING = {
   },
   camera: {
     distance: 18,
-    height: 8.5,
-    lookAhead: 6,
+    height: 9.5,
+    /** Look-at point ahead of the car, m. Puts the car in the lower third like the reference. */
+    lookAhead: 24,
     lookHeight: 0.5,
     fov: 58,
     fovSpeedBoost: 6,
@@ -185,6 +186,15 @@ export const TUNING = {
     /** Below this speed the camera follows body heading instead of velocity direction. */
     headingBlendSpeed: 5,
     shakeDecay: 6,
+    /** Shake amplitude per m/s of heavy-hit impact speed, m; capped at shakeMax. */
+    shakePerImpact: 0.05,
+    shakeMax: 0.8,
+    /** Shake jitter angular frequencies, rad/s (incommensurate so the pattern does not repeat). */
+    shakeFreqX: 37,
+    shakeFreqY: 43,
+    shakeFreqZ: 29,
+    /** Vertical shake relative to horizontal. */
+    shakeYScale: 0.6,
     near: 1,
     far: 1500,
   },
