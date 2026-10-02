@@ -3,10 +3,15 @@
  *
  * Every model is prepared once into a template: materials converted to flat-shaded
  * MeshLambertMaterial, node transforms and the toy-world scale (realHeight x WORLD_SCALE) baked
- * into the geometry, origin at the ground centre, facing +Z. Clones share geometry and materials
- * with the template: callers must not dispose them, and must clone a material before mutating it
- * (e.g. fading) unless the change is meant for every instance of the visual. Shadow flags are left
- * off; the caller decides (buildings and tall decor must not cast shadows, design spec §5).
+ * into the geometry, origin at the ground centre, facing +Z. The pipeline names materials by content
+ * ("colormap#<hash>"), so templates using one colormap share a single Lambert material and GPU texture
+ * per tint.
+ *
+ * create() returns a deep clone: its materials are fresh per call (the caller owns them and may fade,
+ * tint or dispose them), while geometry and textures stay shared with the template (never mutate or
+ * dispose those). Static batching can still merge across clones: materialBatchKey() is equal for
+ * clones of the same template material. Shadow flags are left off; the caller decides (buildings and
+ * tall decor must not cast shadows, design spec §5).
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -14,8 +19,30 @@ import { CATALOG, WORLD_SCALE, type CatalogEntry } from '../render/catalog';
 import type { VisualId } from '../track/trackDef';
 
 export interface AssetLibrary {
-  /** Deep-cloned, scaled (×12 of real size via catalog), origin at ground centre, facing +Z; null if the visual is procedural or failed. */
+  /**
+   * Deep-cloned, scaled (×12 of real size via catalog), origin at ground centre, facing +Z; null if the visual is procedural or failed.
+   * Materials are per-call clones owned by the caller; geometry and textures are shared (read-only). Variant wraps modulo the count.
+   */
   create(visual: VisualId, variant?: number): THREE.Object3D | null;
+}
+
+/** Material names written by scripts/build-assets.mjs: "<name>#<hash of the material's look>". */
+const CONTENT_KEYED = /#[0-9a-f]{8}$/;
+
+/**
+ * Key for merging meshes by material: equal for every clone of one template material (and so across
+ * visuals whose source material has the same content key and tint), the material's own uuid otherwise.
+ */
+export function materialBatchKey(material: THREE.Material): string {
+  const key: unknown = material.userData.batchKey;
+  return typeof key === 'string' ? key : material.uuid;
+}
+
+/** Fresh copy of a template material for one create() call; map textures stay shared. */
+function cloneForCaller(material: THREE.Material): THREE.Material {
+  const copy = material.clone();
+  copy.userData.batchKey = materialBatchKey(material);
+  return copy;
 }
 
 /** Where model files come from and how failures are handled. Injected so the logic is testable in node. */
@@ -58,11 +85,29 @@ export function toLambert(source: THREE.Material, tint?: number): THREE.MeshLamb
   return out;
 }
 
+/** Deep clone of a template for one caller: shared geometry and textures, fresh materials. */
+function instantiate(template: THREE.Group, visual: VisualId): THREE.Object3D {
+  const clone = template.clone();
+  clone.userData.visual = visual;
+  clone.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    const m: THREE.Material | THREE.Material[] = o.material;
+    o.material = Array.isArray(m) ? m.map(cloneForCaller) : cloneForCaller(m);
+  });
+  return clone;
+}
+
 /**
  * Turns a loaded scene into a template: a Group of meshes with identity transforms whose geometry
- * is `targetHeight` metres tall, centred on x/z with its lowest point at y = 0.
+ * is `targetHeight` metres tall, centred on x/z with its lowest point at y = 0. Content-keyed source
+ * materials are converted once per `shared` map (one per library), any other material once per call.
  */
-export function prepareTemplate(scene: THREE.Object3D, targetHeight: number, tint?: number): THREE.Group {
+export function prepareTemplate(
+  scene: THREE.Object3D,
+  targetHeight: number,
+  tint?: number,
+  shared: Map<string, THREE.MeshLambertMaterial> = new Map(),
+): THREE.Group {
   scene.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(scene);
   const height = box.max.y - box.min.y;
@@ -72,13 +117,14 @@ export function prepareTemplate(scene: THREE.Object3D, targetHeight: number, tin
     .makeTranslation(-((box.min.x + box.max.x) / 2) * s, -box.min.y * s, -((box.min.z + box.max.z) / 2) * s)
     .multiply(new THREE.Matrix4().makeScale(s, s, s));
 
-  const converted = new Map<THREE.Material, THREE.MeshLambertMaterial>();
+  const local = new Map<THREE.Material, THREE.MeshLambertMaterial>();
   const convert = (m: THREE.Material): THREE.MeshLambertMaterial => {
-    let out = converted.get(m);
-    if (!out) {
-      out = toLambert(m, tint);
-      converted.set(m, out);
-    }
+    const key = CONTENT_KEYED.test(m.name) ? `${m.name}|${tint ?? 'none'}|${m.vertexColors}` : null;
+    const cached = key === null ? local.get(m) : shared.get(key);
+    if (cached) return cached;
+    const out = toLambert(m, tint);
+    if (key === null) local.set(m, out);
+    else shared.set(key, out);
     return out;
   };
 
@@ -113,6 +159,7 @@ export async function createAssetLibrary(
     (catalog[visual].files ?? []).forEach((file, index) => jobs.push({ visual, index, file }));
   }
   const templates = new Map<VisualId, (THREE.Group | null)[]>();
+  const materials = new Map<string, THREE.MeshLambertMaterial>();
   let done = 0;
   let failed = false;
   onProgress?.(0);
@@ -123,7 +170,7 @@ export async function createAssetLibrary(
       let template: THREE.Group | null = null;
       try {
         const scene = await source.load(file);
-        template = prepareTemplate(scene, entry.realHeight * WORLD_SCALE, entry.tint);
+        template = prepareTemplate(scene, entry.realHeight * WORLD_SCALE, entry.tint, materials);
         template.name = `${visual}-${index}`;
       } catch (err) {
         const message = `Missing asset "${file}" (${visual}): ${err instanceof Error ? err.message : String(err)}`;
@@ -152,11 +199,7 @@ export async function createAssetLibrary(
       // A variant that failed to load (PROD only) falls back to the next loaded one.
       for (let k = 0; k < n; k++) {
         const template = list[(start + k) % n];
-        if (template) {
-          const clone = template.clone();
-          clone.userData.visual = visual;
-          return clone;
-        }
+        if (template) return instantiate(template, visual);
       }
       return null;
     },

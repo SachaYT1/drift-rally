@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
  * Offline asset pipeline: Kenney CC0 packs -> normalised GLBs + render catalog (design spec §5 Assets).
- *
- *   node scripts/build-assets.mjs           build public/models/*.glb + LICENSES.md, refresh the
- *                                           generated block of src/render/catalog.ts, then verify
+ *   node scripts/build-assets.mjs           build public/models/*.glb + LICENSES.md and the generated
+ *                                           block of src/render/catalog.ts (staged and verified first)
  *   node scripts/build-assets.mjs --verify  print file, size, triangle count and height of every GLB
- *
- * Zips are cached in temp/kenney/ (gitignored). A pack page must show the CC0 licence line before
- * its zip is downloaded, and the License.txt inside every zip is checked again before use.
- * Each model: idle pose baked (skinned characters), skins/animations stripped, flattened, joined,
- * deduplicated, metallic 0 / roughness 1, KHR_materials_unlit removed, kit colormap embedded,
- * origin moved to the ground centre and scaled to its real-world height in metres.
+ * Zips are cached in temp/kenney/ (gitignored); a pack page must show the CC0 licence line before its
+ * zip is downloaded, and the License.txt inside every zip is checked again. Each model: idle pose baked
+ * (skinned characters), skins/animations stripped, flattened, joined, deduplicated, metallic 0 /
+ * roughness 1, KHR_materials_unlit removed, colormap embedded, materials content-keyed, front turned
+ * to +Z, origin at the ground centre, scaled to its real-world height in metres. The whole set is built
+ * and verified in temp/models-build/ before public/models and the catalog are replaced.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
@@ -25,6 +25,7 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_DIR = join(ROOT, 'temp/kenney');
 const OUT_DIR = join(ROOT, 'public/models');
+const STAGE_DIR = join(ROOT, 'temp/models-build');
 const CATALOG_FILE = join(ROOT, 'src/render/catalog.ts');
 const CATALOG_BEGIN = '  // BEGIN GENERATED (scripts/build-assets.mjs)';
 const CATALOG_END = '  // END GENERATED';
@@ -34,12 +35,14 @@ const MAX_TEXTURE_SIZE = 1024;
 const MAX_TOTAL_BYTES = 6 * 1024 * 1024;
 const CC0_URL = 'creativecommons.org/publicdomain/zero/1.0';
 
-/** Kenney packs: slug on kenney.nl and the folder that holds the binary models inside the zip. */
+/**
+ * Kenney packs: slug on kenney.nl and the folder that holds the binary models inside the zip.
+ * yaw: rotation about +Y that turns the kit's front to +Z (City Kit storefronts and awnings face -Z).
+ */
 const PACKS = {
-  city: { slug: 'city-kit-commercial', title: 'City Kit (Commercial)', dir: 'Models/GLB format' },
+  city: { slug: 'city-kit-commercial', title: 'City Kit (Commercial)', dir: 'Models/GLB format', yaw: Math.PI },
   characters: { slug: 'mini-characters', title: 'Mini Characters', dir: 'Models/GLB format' },
   food: { slug: 'food-kit', title: 'Food Kit', dir: 'Models/GLB format' },
-  nature: { slug: 'nature-kit', title: 'Nature Kit', dir: 'Models/GLTF format' },
   coaster: { slug: 'coaster-kit', title: 'Coaster Kit', dir: 'Models/GLB format' },
   holiday: { slug: 'holiday-kit', title: 'Holiday Kit', dir: 'Models/GLB format' },
   fantasy: { slug: 'fantasy-town-kit', title: 'Fantasy Town Kit', dir: 'Models/GLB format' },
@@ -52,18 +55,16 @@ const PACKS = {
  * pose: animation whose first frame is baked into skinned meshes. tint: runtime colour multiplier.
  */
 const VISUALS = {
-  officeTower: { realHeight: 25, models: [['city', 'building-skyscraper-b'], ['city', 'building-skyscraper-e']] },
-  officeBlock: { realHeight: 12.5, models: [['city', 'building-i'], ['city', 'building-l'], ['city', 'building-n']] },
-  person: {
-    realHeight: 1.6667,
-    pose: 'idle',
-    models: [['characters', 'character-female-b'], ['characters', 'character-male-d'], ['characters', 'character-female-e']],
-  },
+  // Soft lavender cast over the City Kit's white/navy palette, toward the pastel reference facades.
+  officeTower: { realHeight: 25, tint: 0xeee8ff, models: [['city', 'building-skyscraper-b'], ['city', 'building-skyscraper-e']] },
+  officeBlock: { realHeight: 12.5, tint: 0xeee8ff, models: [['city', 'building-i'], ['city', 'building-l'], ['city', 'building-n']] },
+  person: { realHeight: 1.6667, pose: 'idle', models: ['female-b', 'male-d', 'female-e'].map((c) => ['characters', `character-${c}`]) },
   bench: { realHeight: 0.8, models: [['holiday', 'bench']] },
   lamp: { realHeight: 4, models: [['fantasy', 'lantern']] },
-  tree: { realHeight: 5, models: [['coaster', 'tree-large'], ['coaster', 'tree']] },
-  // Nature Kit mint shifted toward the Coaster Kit tree green.
-  bush: { realHeight: 1, tint: 0x9ccf8a, models: [['nature', 'plant_bushDetailed']] },
+  // One round and one conical tree; both kits share the same leaf green (Nature Kit leaves are mint).
+  tree: { realHeight: 5, models: [['coaster', 'tree-large'], ['fantasy', 'tree']] },
+  // Trimmed hedge in a stone planter: Nature Kit "bushes" are all spiky agave-like plants.
+  bush: { realHeight: 1, models: [['fantasy', 'hedge-large']] },
   trashBin: { realHeight: 1, models: [['coaster', 'trash']] },
   fountain: { realHeight: 1.5, models: [['fantasy', 'fountain-round-detail']] },
   planterTree: { realHeight: 4.1667 },
@@ -135,14 +136,9 @@ async function readModel(io, zip, pack, name) {
 
 // ---- Skinned pose bake ("frozen idle") ----
 
-/** Column-major 4x4 multiply: a * b. */
-function mul4(a, b) {
-  const r = new Array(16).fill(0);
-  for (let c = 0; c < 4; c++) {
-    for (let row = 0; row < 4; row++) for (let k = 0; k < 4; k++) r[c * 4 + row] += a[k * 4 + row] * b[c * 4 + k];
-  }
-  return r;
-}
+/** Column-major 4x4 multiply: a * b (element i = column floor(i / 4), row i % 4). */
+const mul4 = (a, b) =>
+  Array.from({ length: 16 }, (_, i) => [0, 1, 2, 3].reduce((r, k) => r + a[k * 4 + (i % 4)] * b[(i >> 2) * 4 + k], 0));
 
 const isIdentity = (m) => m.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-6);
 
@@ -151,14 +147,12 @@ function bakePose(doc, animName) {
   const root = doc.getRoot();
   const anim = root.listAnimations().find((a) => a.getName() === animName);
   if (!anim) throw new Error(`animation "${animName}" not found`);
+  const setters = { translation: 'setTranslation', rotation: 'setRotation', scale: 'setScale' };
   for (const channel of anim.listChannels()) {
     const sampler = channel.getSampler();
     const value = sampler.getOutput().getElement(sampler.getInterpolation() === 'CUBICSPLINE' ? 1 : 0, []);
-    const node = channel.getTargetNode();
-    const path = channel.getTargetPath();
-    if (path === 'translation') node.setTranslation(value);
-    else if (path === 'rotation') node.setRotation(value);
-    else if (path === 'scale') node.setScale(value);
+    const setter = setters[channel.getTargetPath()];
+    if (setter) channel.getTargetNode()[setter](value);
   }
   const buffer = root.listBuffers()[0];
   for (const node of root.listNodes()) {
@@ -169,10 +163,7 @@ function bakePose(doc, animName) {
     const ibm = skin.getInverseBindMatrices();
     const jointMats = skin.listJoints().map((j, i) => mul4(j.getWorldMatrix(), ibm.getElement(i, [])));
     for (const prim of mesh.listPrimitives()) {
-      const pos = prim.getAttribute('POSITION');
-      const nrm = prim.getAttribute('NORMAL');
-      const joints = prim.getAttribute('JOINTS_0');
-      const weights = prim.getAttribute('WEIGHTS_0');
+      const [pos, nrm, joints, weights] = ['POSITION', 'NORMAL', 'JOINTS_0', 'WEIGHTS_0'].map((s) => prim.getAttribute(s));
       const n = pos.getCount();
       const newPos = new Float32Array(n * 3);
       const newNrm = new Float32Array(n * 3);
@@ -184,9 +175,7 @@ function bakePose(doc, animName) {
         weights.getElement(v, w);
         m.fill(0);
         const wsum = w.reduce((sum, x) => sum + x, 0) || 1;
-        for (let k = 0; k < 4; k++) {
-          for (let e = 0; w[k] && e < 16; e++) m[e] += (jointMats[ji[k]][e] * w[k]) / wsum;
-        }
+        for (let k = 0; k < 4; k++) for (let e = 0; w[k] && e < 16; e++) m[e] += (jointMats[ji[k]][e] * w[k]) / wsum;
         for (let a = 0; a < 3; a++) newPos[v * 3 + a] = m[a] * p[0] + m[4 + a] * p[1] + m[8 + a] * p[2] + m[12 + a];
         if (!nrm) continue;
         nrm.getElement(v, q);
@@ -205,16 +194,8 @@ function bakePose(doc, animName) {
 // ---- Normalisation ----
 
 /** TextureInfos of every texture slot the material actually uses. */
-const textureInfos = (mat) =>
-  [
-    [mat.getBaseColorTexture(), mat.getBaseColorTextureInfo()],
-    [mat.getEmissiveTexture(), mat.getEmissiveTextureInfo()],
-    [mat.getNormalTexture(), mat.getNormalTextureInfo()],
-    [mat.getOcclusionTexture(), mat.getOcclusionTextureInfo()],
-    [mat.getMetallicRoughnessTexture(), mat.getMetallicRoughnessTextureInfo()],
-  ]
-    .filter(([texture, info]) => texture && info)
-    .map(([, info]) => info);
+const textureInfos = (mat) => ['BaseColor', 'Emissive', 'Normal', 'Occlusion', 'MetallicRoughness']
+  .filter((slot) => mat[`get${slot}Texture`]()).map((slot) => mat[`get${slot}TextureInfo`]()).filter(Boolean);
 
 /** True when every KHR_texture_transform in the document is a no-op (Kenney sets only texCoord). */
 const onlyIdentityTransforms = (root) =>
@@ -226,15 +207,24 @@ const onlyIdentityTransforms = (root) =>
     return !ox && !oy && sx === 1 && sy === 1 && !t.getRotation() && sameUv;
   });
 
+/**
+ * Renames every material to "<name>#<hash of its look>": equal names then mean equal materials across
+ * GLBs, so the runtime keeps one Lambert material (and one GPU texture) per colormap and tint.
+ */
+function keyMaterials(root) {
+  for (const mat of root.listMaterials()) {
+    const look = [mat.getBaseColorFactor(), mat.getEmissiveFactor(), mat.getAlphaMode(), mat.getAlphaCutoff(), mat.getDoubleSided()];
+    const hash = createHash('sha1').update(JSON.stringify(look));
+    for (const texture of [mat.getBaseColorTexture(), mat.getEmissiveTexture()]) if (texture) hash.update(texture.getImage());
+    mat.setName(`${mat.getName() || 'material'}#${hash.digest('hex').slice(0, 8)}`);
+  }
+}
+
 async function normalise(doc, label) {
   const root = doc.getRoot();
   if (root.listNodes().some((node) => node.getSkin())) throw new Error(`${label}: skinned model needs a pose`);
   // Channels/samplers outlive a disposed Animation and would keep joints and keyframes alive.
-  for (const anim of root.listAnimations()) {
-    for (const channel of anim.listChannels()) channel.dispose();
-    for (const sampler of anim.listSamplers()) sampler.dispose();
-    anim.dispose();
-  }
+  for (const anim of root.listAnimations()) [...anim.listChannels(), ...anim.listSamplers(), anim].forEach((p) => p.dispose());
   for (const skin of root.listSkins()) skin.dispose();
 
   for (const mat of root.listMaterials()) mat.setMetallicFactor(0).setRoughnessFactor(1);
@@ -242,6 +232,7 @@ async function normalise(doc, label) {
     if (ext.extensionName === 'KHR_materials_unlit') ext.dispose();
     else if (ext.extensionName === 'KHR_texture_transform' && onlyIdentityTransforms(root)) ext.dispose();
   }
+  keyMaterials(root);
 
   // Lambert + flat shading needs no tangents; drop UV sets no texture reads.
   for (const prim of root.listMeshes().flatMap((mesh) => mesh.listPrimitives())) {
@@ -268,10 +259,12 @@ async function normalise(doc, label) {
   }
 }
 
-/** Re-centres on the ground centre and scales to `realHeight` metres. Returns the [x, y, z] size. */
-async function fitToGround(doc, realHeight) {
+/** Turns the front to +Z, re-centres on the ground centre, scales to `realHeight` m. Returns the [x, y, z] size. */
+async function fitToGround(doc, realHeight, yaw = 0) {
   const root = doc.getRoot();
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
+  const [c, n] = [Math.cos(yaw), Math.sin(yaw)];
+  if (yaw) for (const mesh of root.listMeshes()) transformMesh(mesh, [c, 0, -n, 0, 0, 1, 0, 0, n, 0, c, 0, 0, 0, 0, 1]);
   const before = getBounds(scene);
   const s = realHeight / (before.max[1] - before.min[1]);
   const cx = (before.min[0] + before.max[0]) / 2;
@@ -283,14 +276,10 @@ async function fitToGround(doc, realHeight) {
   return [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
 }
 
-const countTriangles = (doc) =>
-  doc.getRoot().listMeshes().flatMap((mesh) => mesh.listPrimitives())
-    .reduce((sum, prim) => sum + (prim.getIndices() ?? prim.getAttribute('POSITION')).getCount() / 3, 0);
-
 // ---- Outputs ----
 
-/** Rewrites the generated block of src/render/catalog.ts (the rest of that file is hand-written). */
-function writeCatalog(entries) {
+/** New source of src/render/catalog.ts with the generated block replaced (the rest is hand-written). */
+function catalogSource(entries) {
   const lines = Object.entries(entries).map(([id, e]) => {
     const files = e.files ? `[${e.files.map((f) => `'${f}'`).join(', ')}]` : 'null';
     const tint = e.tint === undefined ? '' : `, tint: 0x${e.tint.toString(16).padStart(6, '0')}`;
@@ -301,8 +290,7 @@ function writeCatalog(entries) {
   const begin = source.indexOf(CATALOG_BEGIN);
   const end = source.indexOf(CATALOG_END);
   if (begin < 0 || end < begin) throw new Error(`${CATALOG_FILE}: generated-block markers not found`);
-  const block = [CATALOG_BEGIN, ...lines, ''].join('\n');
-  writeFileSync(CATALOG_FILE, source.slice(0, begin) + block + source.slice(end));
+  return source.slice(0, begin) + [CATALOG_BEGIN, ...lines, ''].join('\n') + source.slice(end);
 }
 
 function licensesSource(used) {
@@ -324,9 +312,9 @@ ${rows.join('\n')}
 
 async function build() {
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
-  mkdirSync(OUT_DIR, { recursive: true });
-  for (const f of readdirSync(OUT_DIR)) if (f.endsWith('.glb')) rmSync(join(OUT_DIR, f));
-
+  // Everything is staged first so a failure part-way never leaves public/models half-deleted.
+  rmSync(STAGE_DIR, { recursive: true, force: true });
+  mkdirSync(STAGE_DIR, { recursive: true });
   const zips = {};
   const entries = {};
   const used = {};
@@ -343,9 +331,9 @@ async function build() {
       const doc = await readModel(io, zips[packKey], pack, name);
       if (visual.pose) bakePose(doc, visual.pose);
       await normalise(doc, `${pack.slug}/${name}`);
-      const size = await fitToGround(doc, visual.realHeight);
+      const size = await fitToGround(doc, visual.realHeight, pack.yaw);
       const file = visual.models.length > 1 ? `${id}-${i + 1}.glb` : `${id}.glb`;
-      writeFileSync(join(OUT_DIR, file), await io.writeBinary(doc));
+      writeFileSync(join(STAGE_DIR, file), await io.writeBinary(doc));
       files.push(`models/${file}`);
       sizes.push(size.map((v) => Number((v * WORLD_SCALE).toFixed(1))));
       (used[packKey] ??= []).push(`${file} (${name})`);
@@ -353,34 +341,43 @@ async function build() {
     }
     entries[id] = { files, realHeight: visual.realHeight, tint: visual.tint, sizes };
   }
-  writeCatalog(entries);
-  writeFileSync(join(OUT_DIR, 'LICENSES.md'), licensesSource(used));
-  out('wrote src/render/catalog.ts (generated block) and public/models/LICENSES.md');
-  await verify();
+  writeFileSync(join(STAGE_DIR, 'LICENSES.md'), licensesSource(used));
+  const catalog = catalogSource(entries);
+  await verify(STAGE_DIR);
+
+  mkdirSync(OUT_DIR, { recursive: true });
+  for (const f of readdirSync(OUT_DIR)) if (f.endsWith('.glb')) rmSync(join(OUT_DIR, f));
+  for (const f of readdirSync(STAGE_DIR)) renameSync(join(STAGE_DIR, f), join(OUT_DIR, f));
+  writeFileSync(CATALOG_FILE, catalog);
+  rmSync(STAGE_DIR, { recursive: true, force: true });
+  out('replaced public/models (GLBs + LICENSES.md) and the generated block of src/render/catalog.ts');
 }
 
-/** Prints every GLB with its size, triangle count and height; fails on rule violations. */
-async function verify() {
+/** Prints every GLB in `dir` with its size, triangle count and height; fails on rule violations. */
+async function verify(dir = OUT_DIR) {
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
-  const files = readdirSync(OUT_DIR).filter((f) => f.endsWith('.glb')).sort();
+  const files = readdirSync(dir).filter((f) => f.endsWith('.glb')).sort();
   const problems = [];
   let total = 0;
   const cols = ['KB', 'tris', 'real h', 'world h'].map((c) => c.padStart(9)).join('');
   out(`${'file'.padEnd(20)}${cols}  footprint x * z (world m)`);
   for (const f of files) {
-    const buf = readFileSync(join(OUT_DIR, f));
+    const buf = readFileSync(join(dir, f));
     total += buf.length;
     const doc = await io.readBinary(new Uint8Array(buf));
     const root = doc.getRoot();
     const { min, max } = getBounds(root.listScenes()[0]);
     const h = max[1] - min[1];
-    const stats = [(buf.length / 1024).toFixed(1), countTriangles(doc), h.toFixed(3), (h * WORLD_SCALE).toFixed(1)];
+    const tris = root.listMeshes().flatMap((mesh) => mesh.listPrimitives())
+      .reduce((sum, prim) => sum + (prim.getIndices() ?? prim.getAttribute('POSITION')).getCount() / 3, 0);
+    const stats = [(buf.length / 1024).toFixed(1), tris, h.toFixed(3), (h * WORLD_SCALE).toFixed(1)];
     const footprint = `${((max[0] - min[0]) * WORLD_SCALE).toFixed(1)} x ${((max[2] - min[2]) * WORLD_SCALE).toFixed(1)}`;
     out(`${f.padEnd(20)}${stats.map((v) => String(v).padStart(9)).join('')}  ${footprint}`);
     const check = (bad, what) => bad && problems.push(`${f}: ${what}`);
     check(root.listSkins().length || root.listAnimations().length, 'has skins/animations');
     check(root.listExtensionsUsed().some((e) => e.extensionName === 'KHR_materials_unlit'), 'unlit material');
     check(root.listMaterials().some((m) => m.getMetallicFactor() !== 0), 'metallic material');
+    check(root.listMaterials().some((m) => !/#[0-9a-f]{8}$/.test(m.getName())), 'material name is not content-keyed');
     check(root.listTextures().some((t) => Math.max(...(t.getSize() ?? [Infinity])) > MAX_TEXTURE_SIZE), 'texture too big');
     check((parseGlb(buf).json.images ?? []).some((img) => img.uri), 'external image (must be embedded)');
     check(Math.abs(min[1]) > 1e-4 || Math.abs(min[0] + max[0]) > 1e-3 || Math.abs(min[2] + max[2]) > 1e-3, 'origin not at ground centre');

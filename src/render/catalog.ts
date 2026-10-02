@@ -23,13 +23,13 @@ export interface CatalogEntry {
 
 export const CATALOG: Record<VisualId, CatalogEntry> = {
   // BEGIN GENERATED (scripts/build-assets.mjs)
-  officeTower: { files: ['models/officeTower-1.glb', 'models/officeTower-2.glb'], realHeight: 25, sizes: [[91.1, 300, 91.1], [95.2, 300, 91.3]] },
-  officeBlock: { files: ['models/officeBlock-1.glb', 'models/officeBlock-2.glb', 'models/officeBlock-3.glb'], realHeight: 12.5, sizes: [[110.7, 150, 116.2], [90.5, 150, 92.6], [140.3, 150, 110.1]] },
+  officeTower: { files: ['models/officeTower-1.glb', 'models/officeTower-2.glb'], realHeight: 25, tint: 0xeee8ff, sizes: [[91.1, 300, 91.1], [95.2, 300, 91.3]] },
+  officeBlock: { files: ['models/officeBlock-1.glb', 'models/officeBlock-2.glb', 'models/officeBlock-3.glb'], realHeight: 12.5, tint: 0xeee8ff, sizes: [[110.7, 150, 116.2], [90.5, 150, 92.6], [140.3, 150, 110.1]] },
   person: { files: ['models/person-1.glb', 'models/person-2.glb', 'models/person-3.glb'], realHeight: 1.6667, sizes: [[18.4, 20, 11.6], [18.4, 20, 9.4], [18.5, 20, 14.7]] },
   bench: { files: ['models/bench.glb'], realHeight: 0.8, sizes: [[14.7, 9.6, 8.3]] },
   lamp: { files: ['models/lamp.glb'], realHeight: 4, sizes: [[6.7, 48, 6.9]] },
-  tree: { files: ['models/tree-1.glb', 'models/tree-2.glb'], realHeight: 5, sizes: [[26.9, 60, 26.9], [43.2, 60, 43.2]] },
-  bush: { files: ['models/bush.glb'], realHeight: 1, tint: 0x9ccf8a, sizes: [[20.1, 12, 20.1]] },
+  tree: { files: ['models/tree-1.glb', 'models/tree-2.glb'], realHeight: 5, sizes: [[26.9, 60, 26.9], [25.4, 60, 25.4]] },
+  bush: { files: ['models/bush.glb'], realHeight: 1, sizes: [[8, 12, 20]] },
   trashBin: { files: ['models/trashBin.glb'], realHeight: 1, sizes: [[11.6, 12, 11.6]] },
   fountain: { files: ['models/fountain.glb'], realHeight: 1.5, sizes: [[75, 18, 75]] },
   planterTree: { files: null, realHeight: 4.1667 },
