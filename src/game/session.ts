@@ -70,7 +70,8 @@ interface SessionConfig {
 
 /**
  * Create a race on `track`. `opts.bestLap` (seconds, e.g. the saved record) seeds `state.bestLap`
- * and the `best` flag of lap events: a lap is `best` only when it beats every earlier lap AND the seed.
+ * and the `best` flag of lap events: a lap is `best` only when it beats the seed (if any) and every
+ * earlier lap; the first lap without a seed is never `best` (nothing to beat).
  */
 export function createSession(
   track: Track,
@@ -218,8 +219,9 @@ function stepRacing(
       events.push(e);
       continue;
     }
-    const best = bestLap === null || e.lapTime < bestLap;
-    if (best) bestLap = e.lapTime;
+    // "Best" needs something to beat: the seeded record or an earlier lap of this race.
+    const best = bestLap !== null && e.lapTime < bestLap;
+    if (bestLap === null || e.lapTime < bestLap) bestLap = e.lapTime;
     events.push({ ...e, best });
   }
   // An item still touching the car here would re-trigger next step; track data keeps coins and light

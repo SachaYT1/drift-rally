@@ -246,7 +246,10 @@ export function createSfxPlayer(
         case 'coin': coin(at); return true;
         case 'hit': hit(e.impactSpeed, at); return true;
         case 'scrape': scrape(at); return true;
-        case 'chainBanked': arpeggio(BANK_NOTES, at, 0.055, 'square', 0.12, 0.28); return true;
+        case 'chainBanked':
+          if (e.points <= 0) return false; // nothing earned: no reward cue
+          arpeggio(BANK_NOTES, at, 0.055, 'square', 0.12, 0.28);
+          return true;
         case 'chainBurned': burned(at); return true;
         case 'penalty': penalty(at); return true;
         case 'lap':

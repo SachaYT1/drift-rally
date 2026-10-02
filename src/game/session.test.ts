@@ -310,7 +310,7 @@ describe('session: laps and result', () => {
 
     const fresh = lapEvents(null);
     const times = fresh.st.result!.lapTimes;
-    expect(fresh.laps.map((e) => e.type === 'lap' && e.best)).toEqual([true, times[1] < times[0]]);
+    expect(fresh.laps.map((e) => e.type === 'lap' && e.best)).toEqual([false, times[1] < times[0]]);
     expect(fresh.st.bestLap).toBe(Math.min(...times));
     // Lap pickups reset: coins taken this lap were cleared at the line.
     expect(fresh.st.pickups.coinsPicked).toBeGreaterThan(fresh.st.pickups.coinsTaken.size);

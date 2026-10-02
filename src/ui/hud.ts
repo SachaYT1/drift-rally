@@ -301,12 +301,7 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
         break;
       case 'lap':
         if (e.lap >= laps) break; // the finish toast covers the last lap
-        // `best` is vacuously true for the first lap (nothing to beat), so only flag it from lap 2 on.
-        toast(
-          e.lap + 1 === laps ? 'Последний круг' : `Круг ${e.lap + 1}/${laps}`,
-          formatTime(e.lapTime),
-          e.best && e.lap > 1,
-        );
+        toast(e.lap + 1 === laps ? 'Последний круг' : `Круг ${e.lap + 1}/${laps}`, formatTime(e.lapTime), e.best);
         break;
       case 'wrongWay':
         setWrong(e.active);

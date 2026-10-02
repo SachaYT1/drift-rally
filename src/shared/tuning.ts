@@ -104,7 +104,7 @@ export const TUNING = {
     /** Yaw impulse per m/s of impact, scaled by lever arm sign. */
     yawImpulse: 0.15,
     iterations: 3,
-    /** Seconds before the same collider can emit another hit/scrape event. */
+    /** Seconds before the same collider can emit another scrape event (heavy hits always report). */
     cooldown: 0.3,
   },
   score: {
