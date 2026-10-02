@@ -1,17 +1,18 @@
 /**
- * High chase camera (design spec §4).
+ * High chase camera (design spec §4, plan Task 13).
  *
  * - Yaw target blends from the body heading (slow or reversing) to the velocity heading
  *   (at speed), so the drift angle stays visible. The yaw follows it with exponential
- *   smoothing `1 - exp(-k dt)` and a yaw-rate cap.
- * - The orbit position follows the yaw through a second smoothing stage (`posSmoothing`),
- *   which rounds off the corners of the rate-capped yaw. Translation is locked to the
- *   (interpolated) car position, so there is no speed-dependent lag.
- * - Distance and FOV grow slightly with a smoothed speed ratio.
+ *   smoothing `1 - exp(-k dt)` (`yawSmoothing`) and a yaw-rate cap (`maxYawRate`).
+ * - Position = car - dir(yaw) * (distance + boost) + up * height; look target =
+ *   car + dir(yaw) * lookAhead + up * lookHeight. Both use the same smoothed yaw (one
+ *   smoothing stage), and translation is locked to the (interpolated) car position, so
+ *   there is no speed-dependent lag.
+ * - Distance and FOV grow slightly with a speed ratio smoothed by `posSmoothing`.
  * - Shake is a decaying positional jitter; it never moves `target` (shadows, occlusion).
  *
- * All tuning values are read from `t.camera` every frame (the DEV GUI edits them live).
- * No allocations in `update`.
+ * All tuning values (including fov/near/far) are read from `t.camera` every frame, so the
+ * DEV GUI edits them live. No allocations in `update`.
  */
 import * as THREE from 'three';
 import type { CarState } from '../shared/types';
@@ -55,23 +56,27 @@ function isValidCar(car: CarState): boolean {
   );
 }
 
+/** Sets fov/near/far and rebuilds the projection matrix only if something changed. */
+function applyProjection(camera: THREE.PerspectiveCamera, fov: number, near: number, far: number): void {
+  if (Math.abs(camera.fov - fov) <= FOV_EPSILON && camera.near === near && camera.far === far) return;
+  camera.fov = fov;
+  camera.near = near;
+  camera.far = far;
+  camera.updateProjectionMatrix();
+}
+
 export function createChaseCamera(camera: THREE.PerspectiveCamera, t: Tuning = TUNING): ChaseCamera {
   const target = new THREE.Vector3();
 
-  /** Smoothed look yaw (rad, wrapped). */
+  /** Smoothed camera yaw (rad, wrapped); drives both position and look target. */
   let yaw = 0;
-  /** Orbit yaw of the camera position; follows `yaw` with posSmoothing. */
-  let orbitYaw = 0;
   /** Smoothed speed / maxSpeed in [0, 1]; drives distance and FOV boosts. */
   let speedRatio = 0;
   let shakeAmp = 0;
   let shakeTime = 0;
   let placed = false;
 
-  camera.near = t.camera.near;
-  camera.far = t.camera.far;
-  camera.fov = t.camera.fov;
-  camera.updateProjectionMatrix();
+  applyProjection(camera, t.camera.fov, t.camera.near, t.camera.far);
 
   /** Yaw the camera wants: body heading when slow/reversing, velocity heading at speed. */
   function goalYaw(car: CarState): number {
@@ -109,24 +114,19 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera, t: Tuning = T
       sz = shakeAmp * Math.sin(shakeTime * SHAKE_FREQ_Z + 2.1);
     }
     camera.position.set(
-      car.x - Math.sin(orbitYaw) * dist + sx,
+      car.x - Math.sin(yaw) * dist + sx,
       c.height + sy,
-      car.z - Math.cos(orbitYaw) * dist + sz,
+      car.z - Math.cos(yaw) * dist + sz,
     );
     camera.lookAt(target);
 
-    const fov = c.fov + c.fovSpeedBoost * speedRatio;
-    if (Math.abs(camera.fov - fov) > FOV_EPSILON) {
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-    }
+    applyProjection(camera, c.fov + c.fovSpeedBoost * speedRatio, c.near, c.far);
     camera.updateMatrixWorld();
   }
 
   function snap(car: CarState): void {
     if (!isValidCar(car)) return;
     yaw = goalYaw(car);
-    orbitYaw = yaw;
     speedRatio = goalSpeedRatio(car);
     shakeAmp = 0;
     placed = true;
@@ -146,9 +146,7 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera, t: Tuning = T
     const turn = wrapAngle(goalYaw(car) - yaw) * damp(c.yawSmoothing, step);
     yaw = wrapAngle(yaw + clamp(turn, -maxTurn, maxTurn));
 
-    const follow = damp(c.posSmoothing, step);
-    orbitYaw = wrapAngle(lerpAngle(orbitYaw, yaw, follow));
-    speedRatio += (goalSpeedRatio(car) - speedRatio) * follow;
+    speedRatio += (goalSpeedRatio(car) - speedRatio) * damp(c.posSmoothing, step);
 
     if (shakeAmp > 0) {
       shakeTime += step;

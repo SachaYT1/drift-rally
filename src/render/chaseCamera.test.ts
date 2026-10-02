@@ -44,6 +44,20 @@ function viewYaw(camera: THREE.PerspectiveCamera, c: CarState): number {
   return Math.atan2(c.x - camera.position.x, c.z - camera.position.z);
 }
 
+/** Look direction as seen from above: heading of the car -> target vector. */
+function lookYaw(chase: ReturnType<typeof createChaseCamera>, c: CarState): number {
+  return Math.atan2(chase.target.x - c.x, chase.target.z - c.z);
+}
+
+/**
+ * Seconds for an exponential filter with rate `k` (1/s) to shrink an error of `initial`
+ * below `tol`, plus `extra` seconds and a frame margin. Keeps the tests valid when the
+ * camera is retuned (Task 18).
+ */
+function settleTime(k: number, initial: number, tol: number, extra = 0): number {
+  return Math.log(Math.max(initial / tol, 1)) / k + extra + 0.25;
+}
+
 function horizontalDistance(camera: THREE.PerspectiveCamera, c: CarState): number {
   return Math.hypot(c.x - camera.position.x, c.z - camera.position.z);
 }
@@ -116,6 +130,23 @@ describe('createChaseCamera', () => {
     expect(horizontalDistance(camera, c)).toBeCloseTo(25, 4);
   });
 
+  it('applies live fov/near/far edits on the next update', () => {
+    const t: Tuning = structuredClone(TUNING);
+    const camera = newCamera();
+    const chase = createChaseCamera(camera, t);
+    const c = car(0);
+    chase.snap(c);
+    t.camera.near = t.camera.near * 2;
+    t.camera.far = t.camera.far / 2;
+    t.camera.fov = t.camera.fov + 5;
+    chase.update(c, DT);
+    expect(camera.near).toBe(t.camera.near);
+    expect(camera.far).toBe(t.camera.far);
+    expect(camera.fov).toBeCloseTo(t.camera.fov, 6);
+    const fresh = new THREE.PerspectiveCamera(camera.fov, camera.aspect, camera.near, camera.far);
+    expect(camera.projectionMatrix.equals(fresh.projectionMatrix)).toBe(true);
+  });
+
   it('first update without snap places the camera immediately', () => {
     const camera = newCamera();
     const chase = createChaseCamera(camera);
@@ -132,7 +163,12 @@ describe('createChaseCamera', () => {
     const vel = body - 30 * DEG;
     chase.snap(car(body, 25, body));
 
-    const end = drive(chase, car(body, 25, vel), 2);
+    let maxSplit = 0;
+    const end = drive(chase, car(body, 25, vel), 2, (c) => {
+      // Single smoothing stage: the camera sits exactly opposite its look direction.
+      maxSplit = Math.max(maxSplit, Math.abs(wrapAngle(viewYaw(camera, c) - lookYaw(chase, c))));
+    });
+    expect(maxSplit).toBeLessThan(1e-9);
     const yaw = viewYaw(camera, end);
     expect(Math.abs(wrapAngle(yaw - vel))).toBeLessThan(Math.abs(wrapAngle(yaw - body)));
   });
@@ -169,15 +205,15 @@ describe('createChaseCamera', () => {
 
     let prev = from;
     let maxStep = 0;
-    // Look direction (target relative to car) reflects the raw smoothed yaw.
-    const targetYaw = (c: CarState): number => Math.atan2(chase.target.x - c.x, chase.target.z - c.z);
-    const end = drive(chase, car(to), 3, (c) => {
-      const y = targetYaw(c);
+    const arc = 0.3;
+    const settle = settleTime(cam.yawSmoothing, arc, 5e-4, arc / cam.maxYawRate);
+    const end = drive(chase, car(to), settle, (c) => {
+      const y = lookYaw(chase, c);
       maxStep = Math.max(maxStep, Math.abs(wrapAngle(y - prev)));
       prev = y;
     });
     expect(maxStep).toBeLessThanOrEqual(cam.maxYawRate * DT + 1e-9);
-    expect(wrapAngle(targetYaw(end) - to)).toBeCloseTo(0, 3);
+    expect(wrapAngle(lookYaw(chase, end) - to)).toBeCloseTo(0, 3);
     expect(wrapAngle(viewYaw(camera, end) - to)).toBeCloseTo(0, 3);
   });
 
@@ -198,15 +234,21 @@ describe('createChaseCamera', () => {
     chase.snap(car(0, 0));
     expect(camera.fov).toBeCloseTo(cam.fov, 6);
 
-    const end = drive(chase, car(0, vmax), 4);
+    const boost = Math.max(cam.fovSpeedBoost, cam.distanceSpeedBoost);
+    const end = drive(chase, car(0, vmax), settleTime(cam.posSmoothing, boost, 5e-4));
     expect(camera.fov).toBeCloseTo(cam.fov + cam.fovSpeedBoost, 3);
     expect(horizontalDistance(camera, end)).toBeCloseTo(cam.distance + cam.distanceSpeedBoost, 2);
     expect(camera.projectionMatrix.equals(new THREE.PerspectiveCamera(
       camera.fov, camera.aspect, camera.near, camera.far).projectionMatrix)).toBe(true);
 
-    // Speed changes are smoothed: one frame after a sudden stop the FOV barely moves.
+    // Speed changes are smoothed: one frame after a sudden stop the boost has only
+    // shrunk by the posSmoothing factor, it has not jumped back to the base FOV.
+    const fovBefore = camera.fov;
     chase.update({ ...end, vx: 0, vz: 0, speed: 0, forwardSpeed: 0 }, DT);
-    expect(camera.fov).toBeGreaterThan(cam.fov + cam.fovSpeedBoost * 0.8);
+    const keep = Math.exp(-cam.posSmoothing * DT);
+    // Precision 3: camera.fov is only rewritten when it moves by more than 1e-4 deg.
+    expect(camera.fov).toBeCloseTo(cam.fov + (fovBefore - cam.fov) * keep, 3);
+    expect(camera.fov).toBeGreaterThan(cam.fov);
   });
 
   it('snap applies the speed-dependent distance and FOV immediately', () => {
@@ -236,7 +278,8 @@ describe('createChaseCamera', () => {
     expect(maxOffset).toBeGreaterThan(0.05);
     expect(maxOffset).toBeLessThanOrEqual(0.5 * Math.sqrt(3) + 1e-9);
 
-    for (let i = 0; i < 4 / DT; i++) chase.update(c, DT);
+    const settle = settleTime(cam.shakeDecay, 0.5, 1e-4);
+    for (let i = 0; i < settle / DT; i++) chase.update(c, DT);
     expect(camera.position.distanceTo(rest)).toBeLessThan(1e-3);
   });
 
