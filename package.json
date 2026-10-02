@@ -17,8 +17,13 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@playwright/test": "^1.63.0",
+    "@types/adm-zip": "^0.5.8",
     "@types/three": "^0.186.0",
+    "adm-zip": "^0.6.1",
     "jsdom": "^27.0.1",
     "typescript": "^7.0.2",
     "vite": "^6.4.3",
