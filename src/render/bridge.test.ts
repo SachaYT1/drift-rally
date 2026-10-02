@@ -184,6 +184,18 @@ describe('car model', () => {
     expect(body.rotation.z).toBe(0);
   });
 
+  it('stays cheap: body merged per material, one mesh per wheel', () => {
+    const model = createCarModel();
+    let meshes = 0;
+    model.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        meshes++;
+        expect(o.castShadow).toBe(true);
+      }
+    });
+    expect(meshes).toBeLessThanOrEqual(7);
+  });
+
   it('setColor changes the paint', () => {
     const model = createCarModel();
     model.setColor(0x3366ff);
