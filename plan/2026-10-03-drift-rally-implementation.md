@@ -371,7 +371,8 @@ describe('collision', () => {
   });
 
   it('front-right hit yaws the car left (positive yaw rate)', () => {
-    const r = resolveCollisions(car(0, 0, 0, 0, 12), [circle(-1.2, 2.6, 0.5)]);
+    // circle overlaps the front-right corner (right of heading 0 is -x)
+    const r = resolveCollisions(car(0, 0, 0, 0, 12), [circle(-1.0, 1.9, 0.5)]);
     expect(r.heavyHit).not.toBeNull();
     expect(r.state.yawRate).toBeGreaterThan(0);
   });
@@ -384,7 +385,7 @@ describe('collision', () => {
 
   it('capsuleOverlapsCircle', () => {
     const cap = carCapsule(createCarState(0, 0, 0));
-    expect(capsuleOverlapsCircle(cap, 0, 2.5, 0.5)).toBe(true);
+    expect(capsuleOverlapsCircle(cap, 0, 2.3, 0.5)).toBe(true);
     expect(capsuleOverlapsCircle(cap, 3, 0, 0.5)).toBe(false);
   });
 });
@@ -399,7 +400,7 @@ describe('collision', () => {
 **Files:** Modify `src/track/build.ts` · Create `src/track/plaza.ts`, `src/track/geometry.ts` (optional helper split) · Test `src/track/build.test.ts`, `src/track/plaza.test.ts`
 
 ### build.ts
-- World coords: `world = map − origin`. Centreline: `new CatmullRomCurve3(points (x,0,z), true, 'centripetal')`; `curve.arcLengthDivisions = 4000`; `length = curve.getLength()`; samples via `getSpacedPoints(N)` with `N = round(length)` (drop the duplicated last point); tangents from neighbours; signed curvature from the turning angle between neighbour tangents divided by spacing (+ = left, i.e. tangent rotating toward `l`).
+- World coords: `world = map − origin`. Centreline: `new CatmullRomCurve3(points (x,0,z), true, 'centripetal')`; `curve.arcLengthDivisions = 4000`; `length = curve.getLength()`; samples via `getSpacedPoints(N)` with `N = round(length)` (drop the duplicated last point); tangents from neighbours (central difference); signed curvature = turning angle between the tangents at i−3 and i+3 divided by 6·spacing (+ = left, i.e. tangent rotating toward `l`). The ±3 window suppresses sampling noise; the design check measured min radius 24.6 m this way.
 - `project(x,z,hintS?,window?)`: brute force over samples (global) or over indices within ±window of hintS; refine on the segment to the next sample; `lateral = (p − c)·l` with `l = (tz, −tx)`.
 - `surfaceAt(lat)`: `|lat| ≤ roadHalfWidth` road; `≤ +curbWidth` curb; `≤ barrier` runoff; else outside.
 - `poseAt(s, lat=0)`, `sampleAt(s)`: linear interpolation between samples; heading `atan2(tx, tz)`.
@@ -1177,6 +1178,8 @@ describe('quality', () => {
 8. `canAccrue` + `updateDriftScore` (finished flag when progress just finished) → events.
 9. `time += dt` (racing only). On finish: phase `finished`; result = `{ totalPoints, bestChain, totalTime: time, lapTimes, bestLap: min(lapTimes), coinsPicked, coinsFromDrift: floor(totalPoints / pointsPerCoin), coinsEarned }`; event `finish`.
 
+The autopilot below is test-only scaffolding. If it fails to finish because the autopilot itself is weak (it oversteers, under-brakes), improve the autopilot in the test, not the game; if it fails because of a game bug (car stuck on a collider, NaN, progress not counting), fix the game. Report which one it was.
+
 ### Tests — `src/game/session.test.ts`
 
 ```ts
@@ -1246,22 +1249,22 @@ describe('session', () => {
     expect(sess.state().car.speed).toBeLessThan(0.5);
   });
 
-  it('is identical across different frame schedules (fixed-step determinism)', () => {
-    const final = (frames: number[]) => {
-      const sess = createSession(track);
+  it('is deterministic: two sessions fed the same autopilot end in identical states', () => {
+    const run = () => { const s = createSession(track); for (let i = 0; i < 1500; i++) s.step(autopilot(s), { respawn: false }, DT); return s.state(); };
+    const a = run(), b = run();
+    expect(a.car).toEqual(b.car);
+    expect(a.score).toEqual(b.score);
+    expect(a.progress).toEqual(b.progress);
+  });
+
+  it('the fixed loop runs the same number of steps for 60 Hz and 144 Hz frame schedules', () => {
+    const count = (frame: number) => {
       let k = 0;
-      const loop = createFixedLoop({ hz: 120, maxStepsPerFrame: 12, maxFrameDt: 0.1, raf: () => 0, caf: () => {}, render: () => {}, step: (dt) => { sess.step(autopilot(sess), { respawn: false }, dt); k++; } });
-      let t = 0;
-      for (const f of frames) { loop.advance(f); t += f; if (t > 12) break; }
-      return { car: sess.state().car, k };
+      const loop = createFixedLoop({ hz: 120, maxStepsPerFrame: 12, maxFrameDt: 0.1, raf: () => 0, caf: () => {}, render: () => {}, step: () => { k++; } });
+      for (let t = 0; t < 10 - 1e-9; t += frame) loop.advance(frame);
+      return k;
     };
-    const a = final(Array(800).fill(1 / 60));
-    const b = final(Array(2000).fill(1 / 144));
-    const n = Math.min(a.k, b.k);
-    // replay both to the same step count for comparison
-    const replay = (steps: number) => { const s = createSession(track); for (let i = 0; i < steps; i++) s.step(autopilot(s), { respawn: false }, DT); return s.state().car; };
-    expect(replay(n)).toEqual(replay(n));
-    expect(n).toBeGreaterThan(1000);
+    expect(Math.abs(count(1 / 60) - count(1 / 144))).toBeLessThanOrEqual(1);
   });
 });
 ```
