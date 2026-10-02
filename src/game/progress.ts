@@ -4,15 +4,6 @@ import { TUNING, type Tuning } from '../shared/tuning';
 import { clamp, damp, isFiniteNumber, loopDelta, wrapLength } from '../shared/math';
 import type { Track } from '../track/build';
 
-/**
- * Per-step progress cap: |ds| <= |v|·dt·DS_SPEED_FACTOR + DS_SLACK (design spec §2.6).
- * Fixed by the spec rather than a gameplay tuning value, so it is not part of TUNING.
- */
-const DS_SPEED_FACTOR = 1.5;
-const DS_SLACK = 0.5;
-/** Exponential smoothing rate of progressSpeed (ds/dt), 1/s. */
-const PROGRESS_SPEED_SMOOTHING = 10;
-
 export interface ProgressState {
   /** Last projected arc length (wrapped). */
   s: number;
@@ -104,13 +95,14 @@ export function updateProgress(
     : track.project(car.x, car.z, state.s, t.progress.window);
   if (!isFiniteNumber(proj.s)) return { state, events: [], lapCompleted: false };
 
-  const maxDs = Math.abs(car.speed) * dt * DS_SPEED_FACTOR + DS_SLACK;
+  // Per-step cap against teleport-like projection jumps (spec §2.6).
+  const maxDs = Math.abs(car.speed) * dt * t.progress.dsSpeedFactor + t.progress.dsSlack;
   const ds = clamp(loopDelta(state.s, proj.s, L), -maxDs, maxDs);
   const p = state.p + ds;
   const frontier = Math.max(state.frontier, p);
   const progressSpeed =
     dt > 0
-      ? state.progressSpeed + (ds / dt - state.progressSpeed) * damp(PROGRESS_SPEED_SMOOTHING, dt)
+      ? state.progressSpeed + (ds / dt - state.progressSpeed) * damp(t.progress.speedSmoothing, dt)
       : state.progressSpeed;
 
   // Laps: lap k is complete once frontier >= k·L; nothing is counted past the final lap.

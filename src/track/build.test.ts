@@ -211,6 +211,11 @@ describe('track build (synthetic circle)', () => {
     const c = circle.poseAt(37.5 - circle.length, 2);
     near(a.x, b.x, 1e-6);
     near(a.z, c.z, 1e-6);
+    for (const wrapped of [b, c]) {
+      near(wrapped.x, a.x, 1e-6);
+      near(wrapped.z, a.z, 1e-6);
+      near(wrapAngle(wrapped.heading - a.heading), 0, 1e-9);
+    }
     expect(circle.sampleAt(-5).s).toBeCloseTo(circle.length - 5, 6);
     // Left of a counter-clockwise circle is toward its centre (world origin).
     near(Math.hypot(circle.poseAt(80, 4).x, circle.poseAt(80, 4).z), R - 4, 0.1);
@@ -229,6 +234,18 @@ describe('track build (synthetic circle)', () => {
     const w = circle.project(far.x, far.z, 100, 20);
     expect(Math.abs(w.s - 100)).toBeLessThanOrEqual(20 + 2 * circle.spacing);
     expect(Math.abs(w.s - 100)).toBeGreaterThan(18);
+  });
+
+  it('falls back to the global search when the window covers the whole loop or is NaN', () => {
+    const q = circle.poseAt(300, 2);
+    const global = circle.project(q.x, q.z);
+    near(global.s, 300, 0.2);
+    for (const window of [Infinity, circle.length / 2, circle.length, Number.NaN]) {
+      expect(circle.project(q.x, q.z, 100, window)).toEqual(global);
+    }
+    // A negative window degenerates to the sample nearest the hint instead of misreporting index 0.
+    const tight = circle.project(q.x, q.z, 100, -5);
+    near(tight.s, 100, 2 * circle.spacing);
   });
 
   it('classifies exact surface boundaries symmetrically', () => {

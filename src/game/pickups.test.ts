@@ -111,6 +111,23 @@ describe('pickups edge cases', () => {
     expect(res.car.slip).toBe(0);
   });
 
+  it('a prop can be knocked again after resetLap', () => {
+    const first = updatePickups(createPickups(), track, movingCar());
+    expect(first.knocked).toBe(1);
+    expect(updatePickups(first.state, track, first.car).knocked).toBe(0);
+    const again = updatePickups(resetLap(first.state), track, first.car);
+    expect(again.knocked).toBe(1);
+    expect(again.events.filter((e) => e.type === 'propKnocked').map((e) => (e as { id: string }).id)).toEqual(['can-1']);
+    expect(again.state.propsKnocked).toEqual(new Set(['can-1']));
+    expect(again.car.speed).toBeCloseTo(first.car.speed * loss, 9);
+  });
+
+  it('honours a custom prop launch factor', () => {
+    const t = { ...TUNING, pickups: { ...TUNING.pickups, propLaunchFactor: 2 } };
+    const knock = updatePickups(createPickups(), track, movingCar(), t).events.find((e) => e.type === 'propKnocked');
+    expect((knock as { vz: number }).vz).toBeCloseTo(20 * 2, 9);
+  });
+
   it('leaves the car untouched when nothing is knocked', () => {
     const coinsOnly = makeCircleTrack(100, { coins: [{ id: 7, x: 0, z: 2 }] });
     const car = movingCar();

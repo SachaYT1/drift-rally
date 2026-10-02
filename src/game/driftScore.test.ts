@@ -120,6 +120,12 @@ describe('drift score', () => {
 
 describe('drift score edge cases', () => {
   const sc = TUNING.score;
+  /** A chain this long is still at x1. */
+  const SHORT = sc.multiplierStep / 2;
+  /** Idle for less than the grace period: the chain is still in grace. */
+  const IN_GRACE = sc.graceTime / 3;
+  /** Simulated time feed() actually covers for `seconds`. */
+  const fed = (seconds: number) => Math.round(seconds / DT) * DT;
 
   it('canAccrue boundaries: curb counts, strict speed thresholds, slack is inclusive', () => {
     expect(canAccrue({ ...ok, surface: 'curb' })).toBe(true);
@@ -131,7 +137,7 @@ describe('drift score edge cases', () => {
   });
 
   it('never mutates its inputs', () => {
-    const s = Object.freeze(feed(createDriftScore(), 1, { accruing: true }).s);
+    const s = Object.freeze(feed(createDriftScore(), SHORT, { accruing: true }).s);
     const input = Object.freeze({ ...base, accruing: true, propsKnocked: 1, finished: true });
     const snapshot = { ...s };
     const r = updateDriftScore(s, input, DT);
@@ -146,32 +152,35 @@ describe('drift score edge cases', () => {
   });
 
   it('emits chainStart once per chain and no multiplier event at x1', () => {
-    const { events } = feed(createDriftScore(), 1, { accruing: true });
+    const { events } = feed(createDriftScore(), SHORT, { accruing: true });
     expect(events).toEqual([{ type: 'chainStart' }]);
   });
 
   it('negative slip scores like positive slip; backward progress speed scores nothing', () => {
-    const pos = feed(createDriftScore(), 1, { accruing: true }).s.chainPoints;
-    const neg = feed(createDriftScore(), 1, { accruing: true, slip: -30 * DEG }).s.chainPoints;
+    const pos = feed(createDriftScore(), SHORT, { accruing: true }).s.chainPoints;
+    const neg = feed(createDriftScore(), SHORT, { accruing: true, slip: -30 * DEG }).s.chainPoints;
     expect(neg).toBeCloseTo(pos, 9);
-    expect(feed(createDriftScore(), 1, { accruing: true, progressSpeed: -5 }).s.chainPoints).toBe(0);
+    expect(feed(createDriftScore(), SHORT, { accruing: true, progressSpeed: -5 }).s.chainPoints).toBe(0);
   });
 
   it('a chain in grace keeps its multiplier and drift time when it resumes', () => {
-    let { s } = feed(createDriftScore(), 2.5, { accruing: true });
+    // Accrue into the x2 band, pause inside the grace period, resume while still below x3.
+    const accrue = sc.multiplierStep * 1.25;
+    const resume = sc.multiplierStep * 0.05;
+    let { s } = feed(createDriftScore(), accrue, { accruing: true });
     expect(s.multiplier).toBe(2);
-    s = feed(s, 1, {}).s;
+    s = feed(s, (sc.graceTime * 2) / 3, {}).s;
     expect(s.phase).toBe('grace');
     expect(s.multiplier).toBe(2);
-    const r = feed(s, 0.1, { accruing: true });
+    const r = feed(s, resume, { accruing: true });
     expect(r.s.multiplier).toBe(2);
-    expect(r.s.chainDriftTime).toBeCloseTo(2.6, 6);
+    expect(r.s.chainDriftTime).toBeCloseTo(fed(accrue) + fed(resume), 6);
     expect(r.events.filter((e) => e.type === 'multiplier' || e.type === 'chainStart')).toHaveLength(0);
   });
 
   it('burns a chain that is in grace; no burn event when idle', () => {
-    let { s } = feed(createDriftScore(), 1, { accruing: true });
-    s = feed(s, 0.5, {}).s;
+    let { s } = feed(createDriftScore(), SHORT, { accruing: true });
+    s = feed(s, IN_GRACE, {}).s;
     expect(s.phase).toBe('grace');
     const r = updateDriftScore(s, { ...base, heavyHit: true }, DT);
     expect(r.state).toMatchObject({ phase: 'idle', chainPoints: 0, multiplier: 1, totalPoints: 0 });
@@ -180,8 +189,8 @@ describe('drift score edge cases', () => {
   });
 
   it('finish banks a chain in grace; finishing while idle emits nothing', () => {
-    let { s } = feed(createDriftScore(), 1, { accruing: true });
-    s = feed(s, 0.5, {}).s;
+    let { s } = feed(createDriftScore(), SHORT, { accruing: true });
+    s = feed(s, IN_GRACE, {}).s;
     const chain = Math.round(s.chainPoints);
     const r = updateDriftScore(s, { ...base, finished: true }, DT);
     expect(r.state.totalPoints).toBe(chain);
@@ -190,13 +199,14 @@ describe('drift score edge cases', () => {
   });
 
   it('a new chain after banking starts fresh; totals add up and bestChain keeps the max', () => {
-    let { s } = feed(createDriftScore(), 1, { accruing: true });
+    let { s } = feed(createDriftScore(), SHORT, { accruing: true });
     s = feed(s, sc.graceTime + 0.1, {}).s;
     const first = s.totalPoints;
-    const r = feed(s, 0.5, { accruing: true });
+    const secondTime = sc.multiplierStep / 4;
+    const r = feed(s, secondTime, { accruing: true });
     expect(r.events[0]).toEqual({ type: 'chainStart' });
     expect(r.s.multiplier).toBe(1);
-    expect(r.s.chainDriftTime).toBeCloseTo(0.5, 6);
+    expect(r.s.chainDriftTime).toBeCloseTo(fed(secondTime), 6);
     const done = feed(r.s, sc.graceTime + 0.1, {}).s;
     const second = Math.round(r.s.chainPoints);
     expect(done.totalPoints).toBe(first + second);

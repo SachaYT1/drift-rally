@@ -302,3 +302,42 @@ describe('collision with a polyline wall', () => {
     }
   });
 });
+
+describe('collision with a custom tuning argument', () => {
+  const withCollision = (patch: Partial<typeof TUNING.collision>) => ({
+    ...TUNING,
+    collision: { ...TUNING.collision, ...patch },
+  });
+
+  it('honours restitution and heavyImpact', () => {
+    const bouncy = resolveCollisions(car(0, 0, 0, 10, 0), [circle(1.5, 0, 1)], withCollision({ restitution: 0.6 }));
+    expect(bouncy.heavyHit).not.toBeNull();
+    expect(bouncy.state.vx).toBeCloseTo(-0.6 * 10, 9);
+    expect(bouncy.state.speed).toBeCloseTo(6, 9);
+    const tough = resolveCollisions(car(0, 0, 0, 10, 0), [circle(1.5, 0, 1)], withCollision({ heavyImpact: 20 }));
+    expect(tough.contacts[0].impactSpeed).toBeCloseTo(10, 9);
+    expect(tough.heavyHit).toBeNull();
+    expect(tough.state.mode).toBe('grip');
+  });
+
+  it('honours the iteration count', () => {
+    // Pushing out of the post drives the car back into the wall, so each extra pass leaves less overlap.
+    const post = { x: 1.6, z: 1.6, r: 0.6 };
+    const colliders = [wallX(0), circle(post.x, post.z, post.r, 'post')];
+    const residual = (s: CarState): number => {
+      const cap = carCapsule(s);
+      const wallPen = TUNING.car.radius - Math.min(cap.az, cap.bz);
+      const postPen = post.r + TUNING.car.radius - segPointDist(cap.ax, cap.az, cap.bx, cap.bz, post.x, post.z);
+      return Math.max(0, wallPen) + Math.max(0, postPen);
+    };
+    const start = car(0, 0.5, Math.PI / 2);
+    const onePass = resolveCollisions(start, colliders, withCollision({ iterations: 1 }));
+    const fullPasses = resolveCollisions(start, colliders);
+    expect(TUNING.collision.iterations).toBeGreaterThan(1);
+    expect(onePass.contacts.map((c) => c.colliderId).sort()).toEqual(['post', 'w']);
+    expect(residual(onePass.state)).toBeGreaterThan(residual(fullPasses.state) + 0.1);
+    const none = resolveCollisions(start, colliders, withCollision({ iterations: 0 }));
+    expect(none.contacts).toEqual([]);
+    expect(none.state).toEqual(start);
+  });
+});

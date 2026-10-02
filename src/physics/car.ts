@@ -1,23 +1,7 @@
 /** Assisted arcade drift car model. Pure: no three.js imports. See design spec §2.3. */
 import type { CarState, InputFrame, SurfaceKind } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
-import { DEG, approach, clamp, damp, lerp, wrapAngle } from '../shared/math';
-
-// Fixed constants of the Task 1 algorithm that are not exposed in TUNING.
-/** Below this speed the slip angle is reported as 0, m/s. */
-const SLIP_MIN_SPEED = 1;
-/** A drift ends when speed drops below drift.minSpeed times this factor. */
-const DRIFT_HOLD_SPEED_FACTOR = 0.75;
-/** Throttle below this counts as released for the drift exit timer. */
-const DRIFT_THROTTLE_MIN = 0.1;
-/** Extra target slip while the handbrake is held in a drift, rad. */
-const HANDBRAKE_EXTRA_SLIP = 5 * DEG;
-/** Recovery eases the body toward the velocity heading only above this speed, m/s. */
-const RECOVER_MIN_SPEED = 3;
-/** Recovery yaw-rate target per radian of heading error, 1/s. */
-const RECOVER_YAW_GAIN = 4;
-/** rpm = |vf| / maxSpeed * RPM_SPEED_SHARE + throttle * (1 - RPM_SPEED_SHARE). */
-const RPM_SPEED_SHARE = 0.85;
+import { approach, clamp, damp, lerp, wrapAngle } from '../shared/math';
 
 interface SurfaceParams {
   grip: number;
@@ -73,7 +57,7 @@ export function createCarState(x: number, z: number, heading: number): CarState 
     modeTimer: 0,
     reverseHold: 0,
     wheelSpin: 0,
-    ...derive(heading, 0, 0),
+    ...derive(heading, 0, 0, TUNING),
     rpm: 0,
   };
 }
@@ -95,7 +79,8 @@ export function stepCar(
   let motion: Motion;
   let gripBlend = m.gripBlend;
   let reverseHold = 0;
-  // Seconds in the CURRENT drift: 0 in grip / recover (collision.ts enters recover without resetting it).
+  // Seconds in the CURRENT drift, always 0 outside drift mode. exitDrift and the heavy-hit response in
+  // collision.ts already clear it; zeroing here also normalises states built outside the simulation.
   let driftTime = 0;
   if (m.mode === 'drift') {
     motion = integrateDrift(ctx, m.driftDir);
@@ -109,8 +94,9 @@ export function stepCar(
 
   // 6. Integrate pose and visual/audio extras.
   const heading = ctx.h + motion.yawRate * dt;
-  const derived = derive(heading, motion.vx, motion.vz);
-  const rpm = (Math.abs(derived.forwardSpeed) / t.car.maxSpeed) * RPM_SPEED_SHARE + ctx.throttle * (1 - RPM_SPEED_SHARE);
+  const derived = derive(heading, motion.vx, motion.vz, t);
+  const share = t.car.rpmSpeedShare;
+  const rpm = (Math.abs(derived.forwardSpeed) / t.car.maxSpeed) * share + ctx.throttle * (1 - share);
   const next: CarState = {
     x: state.x + motion.vx * dt,
     z: state.z + motion.vz * dt,
@@ -131,7 +117,15 @@ export function stepCar(
   };
 
   // 7. Defensive: never let a non-finite value escape the simulation.
-  return isFiniteState(next) ? next : stopped(state);
+  return isFiniteState(next) ? next : stopped(state, t);
+}
+
+/**
+ * `state` with speed, forwardSpeed, lateralSpeed and slip recomputed from heading and (vx, vz).
+ * For code that changes the velocity outside stepCar (collision response, prop knocks).
+ */
+export function withDerived(state: CarState, t: Tuning = TUNING): CarState {
+  return { ...state, ...derive(state.heading, state.vx, state.vz, t) };
 }
 
 /** True when the car is in drift mode, fast enough and sliding at >= score.minSlip. */
@@ -170,7 +164,7 @@ function makeContext(s: CarState, input: InputFrame, surface: SurfaceKind, dt: n
     speed,
     vf: s.vx * Math.sin(h) + s.vz * Math.cos(h),
     phi,
-    slip: speed < SLIP_MIN_SPEED ? 0 : wrapAngle(h - phi),
+    slip: speed < t.car.slipMinSpeed ? 0 : wrapAngle(h - phi),
     steerInput,
     steer,
     throttle: clamp(input.throttle, 0, 1),
@@ -219,9 +213,9 @@ function nextMode(s: CarState, c: StepContext): ModeFields {
   }
 
   // Drift.
-  if (c.speed < d.minSpeed * DRIFT_HOLD_SPEED_FACTOR || c.vf <= 0) return exitDrift(cur);
+  if (c.speed < d.minSpeed * d.holdSpeedFactor || c.vf <= 0) return exitDrift(cur);
   let modeTimer = 0;
-  if (c.throttle < DRIFT_THROTTLE_MIN && !c.handbrake) {
+  if (c.throttle < d.throttleMin && !c.handbrake) {
     modeTimer = s.modeTimer + c.dt;
     if (modeTimer >= d.exitDelay) return exitDrift(cur);
   }
@@ -255,10 +249,10 @@ function integrateGrip(
   const targetYaw = clamp((vf * Math.tan(angle)) / car.wheelBase, -yawCap, yawCap);
   const response = damp(car.yawResponse, c.dt);
   let yawRate = s.yawRate + (targetYaw - s.yawRate) * response;
-  if (m.mode === 'recover' && c.speed > RECOVER_MIN_SPEED && c.vf > 0) {
+  if (m.mode === 'recover' && c.speed > c.t.drift.recoverMinSpeed && c.vf > 0) {
     // Additionally ease the body toward the velocity heading, only while moving forward: after a
     // head-on bounce the velocity points backwards (error ~ +-pi) and easing would spin the car.
-    const recoverYaw = wrapAngle(c.phi - c.h) * RECOVER_YAW_GAIN;
+    const recoverYaw = wrapAngle(c.phi - c.h) * c.t.drift.recoverYawGain;
     yawRate += (recoverYaw - yawRate) * response;
   }
 
@@ -313,7 +307,7 @@ function integrateDrift(c: StepContext, driftDir: -1 | 0 | 1): Motion {
   const baseCurv = u >= 0 ? lerp(d.curvNeutral, d.curvInto, u) : lerp(d.curvNeutral, d.curvCounter, -u);
   const curvature = baseCurv * (c.handbrake ? d.handbrakeCurvBoost : 1);
   const baseSlip = u >= 0 ? lerp(d.slipMid, d.slipWide, u) : lerp(d.slipMid, d.slipNarrow, -u);
-  const targetSlip = Math.min(baseSlip + (c.handbrake ? HANDBRAKE_EXTRA_SLIP : 0), d.slipMax);
+  const targetSlip = Math.min(baseSlip + (c.handbrake ? d.handbrakeExtraSlip : 0), d.slipMax);
 
   // Path: rotate the velocity direction by pathRate * dt, keeping |v|.
   const pathRate = driftDir * c.speed * curvature;
@@ -335,14 +329,15 @@ function integrateDrift(c: StepContext, driftDir: -1 | 0 | 1): Motion {
 
 /**
  * Drift speed cap. Below the cap it is a hard limit. Above it (a fast drift running onto runoff, or a
- * kick above the cap) speed bleeds off at the brake rate instead of snapping down in one step.
+ * kick above the cap) speed bleeds off at drift.overspeedDecel instead of snapping down in one step.
  */
 function capDriftSpeed(speed: number, raw: number, cap: number, c: StepContext): number {
   if (speed <= cap) return Math.min(raw, cap);
-  return Math.min(raw, Math.max(cap, speed - c.t.car.brakeDecel * c.dt));
+  return Math.min(raw, Math.max(cap, speed - c.t.drift.overspeedDecel * c.dt));
 }
 
-function derive(heading: number, vx: number, vz: number): Derived {
+/** Kinematic fields derived from heading and velocity; the single source for every module. */
+function derive(heading: number, vx: number, vz: number, t: Tuning): Derived {
   const speed = Math.hypot(vx, vz);
   const fx = Math.sin(heading);
   const fz = Math.cos(heading);
@@ -350,7 +345,7 @@ function derive(heading: number, vx: number, vz: number): Derived {
     speed,
     forwardSpeed: vx * fx + vz * fz,
     lateralSpeed: vx * fz - vz * fx,
-    slip: speed < SLIP_MIN_SPEED ? 0 : wrapAngle(heading - Math.atan2(vx, vz)),
+    slip: speed < t.car.slipMinSpeed ? 0 : wrapAngle(heading - Math.atan2(vx, vz)),
   };
 }
 
@@ -359,6 +354,6 @@ function isFiniteState(s: CarState): boolean {
 }
 
 /** The previous state with zero velocity (defensive fallback for non-finite results). */
-function stopped(prev: CarState): CarState {
-  return { ...prev, vx: 0, vz: 0, yawRate: 0, ...derive(prev.heading, 0, 0) };
+function stopped(prev: CarState, t: Tuning): CarState {
+  return { ...prev, vx: 0, vz: 0, yawRate: 0, ...derive(prev.heading, 0, 0, t) };
 }

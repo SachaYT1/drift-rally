@@ -1,8 +1,8 @@
 /** Car-vs-static collision on the ground plane. Pure. See design spec §2.4 / §3. */
 import type { CarState, Collider, CollisionResult, Contact } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
-import { clamp, wrapAngle } from '../shared/math';
-import { carCapsule } from './car';
+import { clamp } from '../shared/math';
+import { carCapsule, withDerived } from './car';
 
 type Capsule = { ax: number; az: number; bx: number; bz: number; r: number };
 type Segment = { ax: number; az: number; bx: number; bz: number };
@@ -19,8 +19,6 @@ interface Overlap {
 
 /** Geometric tolerance; also the minimum penetration that counts as an overlap. */
 const EPS = 1e-9;
-/** Below this speed the slip angle is reported as 0, m/s (CarState.slip contract, same as car.ts). */
-const SLIP_MIN_SPEED = 1;
 
 /**
  * Push the car capsule out of every overlapping collider and respond with restitution/friction.
@@ -62,7 +60,7 @@ export function resolveCollisions(
   for (const c of contacts) {
     if (c.impactSpeed >= t.collision.heavyImpact && (!heavyHit || c.impactSpeed > heavyHit.impactSpeed)) heavyHit = c;
   }
-  return { state: withDerived(s), contacts, heavyHit };
+  return { state: withDerived(s, t), contacts, heavyHit };
 }
 
 /** Overlap test between a capsule and a circle (used for pickups). Touching is not an overlap. */
@@ -131,20 +129,6 @@ function record(recorded: Map<string, { contact: Contact; depth: number }>, cont
     contact: contact.impactSpeed > prev.contact.impactSpeed ? contact : prev.contact,
     depth: Math.max(prev.depth, pen),
   });
-}
-
-/** Recompute speed, forwardSpeed, lateralSpeed and slip after position/velocity changed. */
-function withDerived(s: CarState): CarState {
-  const fx = Math.sin(s.heading);
-  const fz = Math.cos(s.heading);
-  const speed = Math.hypot(s.vx, s.vz);
-  return {
-    ...s,
-    speed,
-    forwardSpeed: s.vx * fx + s.vz * fz,
-    lateralSpeed: s.vx * fz - s.vz * fx,
-    slip: speed < SLIP_MIN_SPEED ? 0 : wrapAngle(s.heading - Math.atan2(s.vx, s.vz)),
-  };
 }
 
 // ---------------------------------------------------------------------------

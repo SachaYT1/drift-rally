@@ -132,6 +132,8 @@ function segmentClosest(a: TrackSample, b: TrackSample, x: number, z: number): {
  * Closest centreline point to (x, z). Brute force over all samples, or only over samples within
  * +/- `window` m of `hintS` when a hint is given; then refined on the two segments adjacent to the
  * closest sample. lateral = (p - c) . l with l = (tz, -tx).
+ * A window that covers the whole loop (>= length / 2, Infinity) or is NaN falls back to the global
+ * search; a negative window searches only the sample nearest to the hint.
  */
 export function projectOnCentreline(
   line: Centreline,
@@ -143,10 +145,10 @@ export function projectOnCentreline(
   const { samples, spacing, length } = line;
   const n = samples.length;
   let index: number;
-  if (hintS === undefined || !Number.isFinite(hintS)) {
+  if (hintS === undefined || !Number.isFinite(hintS) || !(window < length / 2)) {
     index = closestSampleIndex(samples, x, z, 0, n);
   } else {
-    const half = Math.ceil(window / spacing);
+    const half = Math.ceil(Math.max(0, window) / spacing);
     const count = Math.min(n, 2 * half + 1);
     index = closestSampleIndex(samples, x, z, Math.round(wrapLength(hintS, length) / spacing) - half, count);
   }

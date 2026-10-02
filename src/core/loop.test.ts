@@ -134,3 +134,94 @@ describe('fixed loop edge cases', () => {
     expect(steps).toHaveLength(2);
   });
 });
+
+describe('fixed loop control from inside step()', () => {
+  const STEP = 1 / 120;
+  /** A loop whose step() calls `onStep(loop, stepIndex)` after recording the step. */
+  function makeControlled(
+    onStep: (loop: ReturnType<typeof createFixedLoop>, index: number) => void,
+    frames?: { raf: (cb: FrameRequestCallback) => number; caf: (id: number) => void; now: () => number },
+  ) {
+    const steps: number[] = []; const renders: number[] = [];
+    const loop: ReturnType<typeof createFixedLoop> = createFixedLoop({
+      hz: 120, maxStepsPerFrame: 12, maxFrameDt: 0.1,
+      step: (dt) => { steps.push(dt); onStep(loop, steps.length); },
+      render: (a) => renders.push(a),
+      raf: () => 0, caf: () => {}, ...frames,
+    });
+    return { loop, steps, renders };
+  }
+  function fakeFrames() {
+    let pending: FrameRequestCallback | null = null;
+    let nextId = 1;
+    let ms = 0;
+    return {
+      raf: (cb: FrameRequestCallback) => { pending = cb; return nextId++; },
+      caf: () => { pending = null; },
+      now: () => ms,
+      get scheduled() { return pending !== null; },
+      frame(t: number) { ms = t; const cb = pending; pending = null; cb?.(t); },
+    };
+  }
+
+  it('pause() inside step() skips the remaining sub-steps and the render of that frame', () => {
+    const { loop, steps, renders } = makeControlled((l, i) => { if (i === 1) l.pause(); });
+    expect(loop.advance(5 * STEP)).toBe(1);
+    expect(steps).toHaveLength(1);
+    expect(renders).toHaveLength(0);
+    expect(loop.paused).toBe(true);
+    expect(loop.advance(5 * STEP)).toBe(0);
+    loop.resume();
+    // The dropped frame time does not come back after resume.
+    expect(loop.advance(2 * STEP)).toBe(2);
+    expect(steps).toHaveLength(3);
+    expect(renders).toHaveLength(1);
+  });
+
+  it('stop() inside step() skips the remaining sub-steps and schedules no further frame', () => {
+    const f = fakeFrames();
+    const { loop, steps, renders } = makeControlled((l, i) => { if (i === 2) l.stop(); }, f);
+    loop.start();
+    f.frame(0);
+    expect(renders).toHaveLength(1);
+    f.frame(1000 * 5 * STEP);
+    expect(steps).toHaveLength(2);
+    expect(renders).toHaveLength(1);
+    expect(f.scheduled).toBe(false);
+  });
+
+  it('stop() inside a directly driven advance() also ends that frame', () => {
+    const { loop, steps, renders } = makeControlled((l, i) => { if (i === 1) l.stop(); });
+    expect(loop.advance(4 * STEP)).toBe(1);
+    expect(renders).toHaveLength(0);
+    // The leftover time of the aborted frame is dropped.
+    expect(loop.advance(STEP / 2)).toBe(0);
+    expect(steps).toHaveLength(1);
+  });
+
+  it('a pause() requested before start() survives start() until resume()', () => {
+    const f = fakeFrames();
+    const { loop, steps } = makeControlled(() => {}, f);
+    loop.pause();
+    loop.start();
+    expect(loop.paused).toBe(true);
+    f.frame(0);
+    f.frame(1000);
+    expect(steps).toHaveLength(0);
+    loop.resume();
+    expect(loop.paused).toBe(false);
+    f.frame(2000); // first frame after resume only re-establishes the timeline
+    expect(steps).toHaveLength(0);
+    f.frame(2000 + 1000 * 2 * STEP);
+    expect(steps).toHaveLength(2);
+  });
+
+  it('resume() before start() cancels the pending pause', () => {
+    const f = fakeFrames();
+    const { loop } = makeControlled(() => {}, f);
+    loop.pause();
+    loop.resume();
+    loop.start();
+    expect(loop.paused).toBe(false);
+  });
+});

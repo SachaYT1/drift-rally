@@ -158,6 +158,25 @@ describe('progress edge cases', () => {
     expect(later.pose.heading).toBeCloseTo(track.poseAt(70, 0).heading, 6);
   });
 
+  it('driving forward again clears wrong-way with exactly one inactive event', () => {
+    const fwd = drive(createProgress(track, 3), 3, 20, 3);
+    const back = drive(fwd.s, fwd.along, -6, TUNING.progress.wrongWayTime + 0.6, fwd.time);
+    expect(back.s.wrongWay).toBe(true);
+    const again = drive(back.s, back.along, 10, TUNING.progress.wrongWayTime, back.time);
+    expect(again.s.wrongWay).toBe(false);
+    expect(again.events.filter((e) => e.type === 'wrongWay')).toEqual([{ type: 'wrongWay', active: false }]);
+  });
+
+  it('honours a custom tuning for the per-step progress cap and the speed smoothing', () => {
+    const t = { ...TUNING, progress: { ...TUNING.progress, dsSpeedFactor: 1, dsSlack: 0.1, speedSmoothing: 1e6 } };
+    const s0 = createProgress(track, 3);
+    const jump = track.poseAt(TUNING.progress.spawnOffset + 40, 0);
+    const r = updateProgress(s0, track, { x: jump.x, z: jump.z, speed: 10 }, DT, DT, 3, t);
+    expect(r.state.p - s0.p).toBeCloseTo(10 * DT + 0.1, 9);
+    // Smoothing this fast makes progressSpeed the raw ds/dt of the step.
+    expect(r.state.progressSpeed).toBeCloseTo((10 * DT + 0.1) / DT, 6);
+  });
+
   it('respawn starts a grace period and the next update clears wrong-way with one event', () => {
     const fwd = drive(createProgress(track, 3), 3, 20, 3);
     const back = drive(fwd.s, fwd.along, -6, TUNING.progress.wrongWayTime + 0.6, fwd.time);

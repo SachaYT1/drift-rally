@@ -5,15 +5,23 @@
  * maxStepsPerFrame, excess time is dropped), then render with the interpolation factor
  * alpha = leftover / stepDt in [0, 1). While paused nothing runs: simulation time is frozen
  * and the canvas keeps its last frame (the app re-renders explicitly when needed, e.g. on resize).
+ * pause() or stop() called from inside step() ends the current frame at once: the remaining
+ * sub-steps are dropped and that frame is not rendered.
  * Pure: no three.js, no DOM access unless the default rAF/clock are used.
  */
 
 export interface FixedLoop {
-  /** requestAnimationFrame-driven. Begins a fresh, unpaused run; no-op when already running. */
+  /**
+   * requestAnimationFrame-driven. Begins a fresh run (clock and accumulator reset); no-op when
+   * already running. The run starts unpaused, except that a pause() requested while the loop was
+   * not running survives start() (until resume()).
+   */
   start(): void;
+  /** Cancels the pending frame. From inside step() it also ends the current advance(). */
   stop(): void;
+  /** Freezes simulation time. From inside step() it also ends the current advance(). */
   pause(): void;
-  /** Resets last-time and accumulator (no lurch). */
+  /** Resets last-time and accumulator (no lurch); also clears a pause requested before start(). */
   resume(): void;
   readonly paused: boolean;
   /** Run the accumulator for one frame of length frameDt (used by rAF and by tests/test-hook). */
@@ -48,7 +56,11 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
 
   let accumulator = 0;
   let paused = false;
+  /** pause() was requested while not running: the next start() keeps the loop paused. */
+  let pauseBeforeStart = false;
   let running = false;
+  /** Bumped by start() and stop(), so an advance() in progress notices a stop from inside step(). */
+  let generation = 0;
   let rafId: number | null = null;
   /** Clock value (ms) of the previous rAF tick; null = next tick starts a fresh timeline. */
   let lastTime: number | null = null;
@@ -58,11 +70,17 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
     // NaN, negative or zero frame times advance nothing; long frames are clamped.
     const dt = frameDt > 0 ? Math.min(frameDt, opts.maxFrameDt) : 0;
     accumulator += dt;
+    const gen = generation;
     let steps = 0;
     while (accumulator >= stepDt - TIME_EPSILON && steps < opts.maxStepsPerFrame) {
       opts.step(stepDt);
       accumulator = Math.max(0, accumulator - stepDt);
       steps++;
+      if (paused || gen !== generation) {
+        // pause() / stop() from inside step(): drop the rest of this frame, render nothing.
+        accumulator = 0;
+        return steps;
+      }
     }
     // Step cap hit: drop the whole steps we could not run (avoids the spiral of death).
     if (accumulator >= stepDt) accumulator %= stepDt;
@@ -84,22 +102,27 @@ export function createFixedLoop(opts: FixedLoopOptions): FixedLoop {
     start(): void {
       if (running) return;
       running = true;
-      paused = false;
+      paused = pauseBeforeStart;
+      pauseBeforeStart = false;
+      generation++;
       accumulator = 0;
       lastTime = null;
       rafId = raf(tick);
     },
     stop(): void {
       running = false;
+      generation++;
       lastTime = null;
       if (rafId !== null) caf(rafId);
       rafId = null;
     },
     pause(): void {
       paused = true;
+      if (!running) pauseBeforeStart = true;
     },
     resume(): void {
       paused = false;
+      pauseBeforeStart = false;
       accumulator = 0;
       lastTime = null;
     },

@@ -40,6 +40,10 @@ export const TUNING = {
     /** Seconds of brake near standstill before reverse engages. */
     reverseDelay: 0.3,
     standstillSpeed: 0.8,
+    /** Below this speed the slip angle is reported as 0, m/s (CarState.slip contract). */
+    slipMinSpeed: 1,
+    /** rpm = |vf| / maxSpeed * rpmSpeedShare + throttle * (1 - rpmSpeedShare). */
+    rpmSpeedShare: 0.85,
   },
   drift: {
     minSpeed: 8,
@@ -73,6 +77,18 @@ export const TUNING = {
     /** steer * driftDir below -flickSteer + a Space press flips the drift direction. */
     flickSteer: 0.6,
     recoverTime: 0.4,
+    /** A drift ends when speed drops below minSpeed times this factor. */
+    holdSpeedFactor: 0.75,
+    /** Throttle below this counts as released for the drift exit timer. */
+    throttleMin: 0.1,
+    /** Extra target slip while the handbrake is held in a drift, rad. */
+    handbrakeExtraSlip: 5 * DEG,
+    /** Speed bleed above the drift speed cap (fast drift onto runoff, kick above the cap), m/s^2. */
+    overspeedDecel: 24,
+    /** Recovery eases the body toward the velocity heading only above this speed, m/s. */
+    recoverMinSpeed: 3,
+    /** Recovery yaw-rate target per radian of heading error, 1/s. */
+    recoverYawGain: 4,
   },
   surface: {
     runoff: { grip: 0.75, dragExtra: 2.5, maxSpeed: 25 },
@@ -120,6 +136,11 @@ export const TUNING = {
     spawnOffset: 3,
     /** Auto-respawn when |lateral| exceeds barrier offset + this, m. */
     outOfBoundsMargin: 2,
+    /** Exponential smoothing rate of progressSpeed (ds/dt), 1/s. */
+    speedSmoothing: 10,
+    /** Per-step progress cap: |ds| <= |v|·dt·dsSpeedFactor + dsSlack, m (spec §2.6). */
+    dsSpeedFactor: 1.5,
+    dsSlack: 0.5,
   },
   pickups: {
     /** Coin trigger radius, tested against the car CAPSULE (reach ≈ coinRadius + car.radius from the body axis). */
@@ -128,6 +149,10 @@ export const TUNING = {
     cupRadius: 0.6,
     /** Fraction of speed lost when knocking a light prop. */
     knockSpeedLoss: 0.03,
+    /** Broad-phase radius around the car centre, m; widened per spot when the capsule reach is larger. */
+    nearRadius: 8,
+    /** A knocked prop is launched with the car velocity times this factor (fx only). */
+    propLaunchFactor: 1.2,
   },
   track: {
     roadHalfWidth: 7,
