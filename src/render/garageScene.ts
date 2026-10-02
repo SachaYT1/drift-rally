@@ -1,6 +1,7 @@
 /**
  * Garage scene (design spec §6, user's garage reference): dark octagonal room with coral accent strips,
- * the car slowly turning on a round podium with a glowing golden rim, warm key light + red rim lights.
+ * the car slowly turning on a round podium with a glowing golden rim; warm key light, a neutral podium fill
+ * and red rim lights. The RoomEnvironment PMREM is applied to the car paint only (spec §5).
  */
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -16,8 +17,10 @@ export interface GarageScene {
   /** The car on the podium (e.g. to mirror the chosen paint). */
   readonly car: CarModel;
   /**
-   * RoomEnvironment PMREM used for paint reflections. Owned by the garage and never disposed; the race
-   * scene may reuse it as `scene.environment` (only the car paint is a MeshStandardMaterial).
+   * RoomEnvironment PMREM used for the paint reflections (applied with `car.setEnvMap`). Owned by the
+   * garage and never disposed. The race scene should reuse it via `raceCar.setEnvMap(garage.envMap)`, NOT
+   * `raceScene.environment`: in three r186 `scene.environment` also lights every Lambert surface (spec §5:
+   * the PMREM is for the car paint only).
    */
   readonly envMap: THREE.Texture;
 }
@@ -28,15 +31,27 @@ const GOLD = 0xf3b23c;
 const ROOM_RADIUS = 17;
 const ROOM_HEIGHT = 9;
 const ROOM_SIDES = 8;
+/** Distance from the room centre to the middle of each wall's inner face. */
+export const GARAGE_ROOM_APOTHEM = ROOM_RADIUS * Math.cos(Math.PI / ROOM_SIDES);
 const PODIUM_RADIUS = 3.6;
 const PODIUM_TOP = 0.58;
+/** Outermost podium radius (the base). */
+export const GARAGE_PODIUM_OUTER_RADIUS = PODIUM_RADIUS + 0.4;
 /** Turntable speed, rad/s, and the starting yaw that shows the car's front 3/4 like the reference. */
 const SPIN_RATE = 0.22;
 const START_YAW = 1.0;
-/** Camera framing: look-at point, pitch (rad) and preferred distance; pulled back on narrow screens. */
+/**
+ * Camera framing: look-at point, pitch (rad), preferred distance and vertical FOV (deg). On narrow
+ * screens the camera first pulls back, then (once it would leave the room) widens its FOV instead.
+ */
 const LOOK_AT = new THREE.Vector3(0, 1.45, 0);
 const CAMERA_PITCH = 0.26;
 const CAMERA_DISTANCE = 12;
+const BASE_FOV = 36;
+const MAX_FOV = 75;
+/** Keep the camera this far (horizontally) in front of the wall behind it (its trims stick out 0.35 m). */
+const WALL_CLEARANCE = 1.2;
+const MAX_CAMERA_DISTANCE = (GARAGE_ROOM_APOTHEM - WALL_CLEARANCE) / Math.cos(CAMERA_PITCH);
 /** Half-width (m) that must stay visible around the podium centre. */
 const FIT_HALF_WIDTH = PODIUM_RADIUS + 1.6;
 
@@ -60,16 +75,25 @@ function mergedMesh(geos: THREE.BufferGeometry[], mat: THREE.Material): THREE.Me
   return mesh;
 }
 
+const SLAT_WIDTH = 4.2;
+/** Slat block centre along the back wall (+x = right as seen from the camera). */
+const SLAT_X = 3.3;
+
 /** Walls (flat panels), pilasters, slatted back wall, coral light strips, floor seams. */
 function buildRoom(): THREE.Group {
   const room = new THREE.Group();
-  const apothem = ROOM_RADIUS * Math.cos(Math.PI / ROOM_SIDES);
+  const apothem = GARAGE_ROOM_APOTHEM;
   const wallWidth = 2 * ROOM_RADIUS * Math.sin(Math.PI / ROOM_SIDES);
 
   const floor = new THREE.Mesh(new THREE.CircleGeometry(ROOM_RADIUS + 1, ROOM_SIDES), lambert(0x241b1a));
   floor.rotation.set(-Math.PI / 2, 0, Math.PI / ROOM_SIDES);
   floor.receiveShadow = true;
   room.add(floor);
+  // Dark ceiling: only seen when narrow viewports widen the camera FOV (see garageCameraFraming).
+  const ceiling = new THREE.Mesh(new THREE.CircleGeometry(ROOM_RADIUS + 1, ROOM_SIDES), lambert(0x1a1313));
+  ceiling.rotation.set(Math.PI / 2, 0, Math.PI / ROOM_SIDES);
+  ceiling.position.y = ROOM_HEIGHT;
+  room.add(ceiling);
 
   // Floor seams: large square tiles.
   const seams: number[] = [];
@@ -103,9 +127,10 @@ function buildRoom(): THREE.Group {
         boxAt(wallWidth * 0.42, 0.14, 0.08, wallWidth * 0.29, stripY + rise, 0.2),
       ],
     };
-    if (i === ROOM_SIDES / 2) {
-      // Back wall (behind the car from the camera): horizontal slats lit by the red glow.
-      for (let s = 0; s < 7; s++) local.trims.push(boxAt(6, 0.22, 0.3, 0, 0.9 + s * 0.48, 0.2));
+    if (i === 0) {
+      // Back wall (z = -apothem, behind the car as seen from the camera on +Z): a block of horizontal
+      // slats right of the strip's ramp and below its high run, lit by the red glow.
+      for (let s = 0; s < 6; s++) local.trims.push(boxAt(SLAT_WIDTH, 0.2, 0.3, SLAT_X, 0.8 + s * 0.46, 0.2));
     }
     const m = new THREE.Matrix4()
       .makeRotationY(angle)
@@ -118,12 +143,6 @@ function buildRoom(): THREE.Group {
   room.add(mergedMesh(trims, lambert(0x4d3934, true)));
   room.add(mergedMesh(strips, new THREE.MeshBasicMaterial({ color: CORAL })));
 
-  // Ceiling lamp (small bright oval, like the reference's overhead light).
-  const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.9, 24), new THREE.MeshBasicMaterial({ color: 0xfff3e0 }));
-  lamp.rotation.x = Math.PI / 2;
-  lamp.scale.set(1.6, 1, 1);
-  lamp.position.set(0, ROOM_HEIGHT - 0.5, -3);
-  room.add(lamp);
   room.traverse((o) => {
     o.matrixAutoUpdate = false;
     o.updateMatrix();
@@ -188,10 +207,47 @@ function buildLights(scene: THREE.Scene): void {
   rimR.position.set(-5.5, 2.2, -3);
   const glow = new THREE.PointLight(0xff3018, 220, 22, 2);
   glow.position.set(1.5, 3.4, -11);
-  // Golden bounce from the podium rim onto the floor.
-  const bounce = new THREE.PointLight(GOLD, 14, 9, 2);
-  bounce.position.set(0, 0.15, 0);
-  scene.add(rimL, rimR, glow, bounce);
+  // Neutral soft fill from the camera side, confined to the podium: keeps the hubs and the podium top
+  // readable while the room stays dark (no IBL on Lambert surfaces).
+  const fill = new THREE.SpotLight(0xfff4ea, 300, 0, 0.42, 0.7, 2);
+  fill.position.set(-2, 7, 12);
+  fill.target.position.set(0, 0.6, 0);
+  scene.add(rimL, rimR, glow, fill, fill.target);
+}
+
+export interface GarageFraming {
+  /** Vertical field of view, degrees. */
+  fov: number;
+  /** Camera distance from the look-at point along the pitched view axis, m. */
+  distance: number;
+}
+
+/**
+ * Camera framing for a viewport aspect (width / height). Keeps FIT_HALF_WIDTH visible around the podium:
+ * first by pulling back (up to MAX_CAMERA_DISTANCE, so the camera stays inside the room), then by widening
+ * the vertical FOV (capped at MAX_FOV).
+ */
+export function garageCameraFraming(aspect: number): GarageFraming {
+  const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
+  const fitDistance = FIT_HALF_WIDTH / (Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) * a);
+  const distance = THREE.MathUtils.clamp(fitDistance, CAMERA_DISTANCE, MAX_CAMERA_DISTANCE);
+  if (fitDistance <= distance) return { fov: BASE_FOV, distance };
+  const fov = THREE.MathUtils.radToDeg(2 * Math.atan(FIT_HALF_WIDTH / (distance * a)));
+  return { fov: Math.min(fov, MAX_FOV), distance };
+}
+
+/** Apply garageCameraFraming(aspect) to `camera`: aspect, FOV, position on the +Z side, look-at. */
+export function applyGarageFraming(camera: THREE.PerspectiveCamera, aspect: number): void {
+  const { fov, distance } = garageCameraFraming(aspect);
+  camera.aspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
+  camera.fov = fov;
+  camera.updateProjectionMatrix();
+  camera.position.set(
+    LOOK_AT.x,
+    LOOK_AT.y + Math.sin(CAMERA_PITCH) * distance,
+    LOOK_AT.z + Math.cos(CAMERA_PITCH) * distance,
+  );
+  camera.lookAt(LOOK_AT);
 }
 
 function createEnvMap(renderer: THREE.WebGLRenderer): THREE.Texture {
@@ -207,11 +263,10 @@ export function createGarageScene(renderer: THREE.WebGLRenderer): GarageScene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(BACKGROUND);
   scene.fog = new THREE.Fog(BACKGROUND, 18, 44);
+  // The PMREM goes on the car paint only (car.setEnvMap below), never on scene.environment.
   const envMap = createEnvMap(renderer);
-  scene.environment = envMap;
-  scene.environmentIntensity = 0.35;
 
-  const camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.5, 120);
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 16 / 9, 0.5, 120);
 
   const goldMat = new THREE.MeshBasicMaterial({ color: GOLD });
   scene.add(buildRoom(), buildPodiumBase(goldMat));
@@ -227,21 +282,14 @@ export function createGarageScene(renderer: THREE.WebGLRenderer): GarageScene {
   inner.position.y = PODIUM_TOP;
   turntable.add(top, inner);
   const car = createCarModel();
+  car.setEnvMap(envMap);
   car.root.position.y = PODIUM_TOP;
   turntable.add(car.root);
   turntable.rotation.y = START_YAW;
   scene.add(turntable);
 
-  const dir = new THREE.Vector3(0, Math.sin(CAMERA_PITCH), Math.cos(CAMERA_PITCH));
-
   function resize(width: number, height: number): void {
-    const aspect = width > 0 && height > 0 ? width / height : 16 / 9;
-    camera.aspect = aspect;
-    camera.updateProjectionMatrix();
-    const tanHalfH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * aspect;
-    const distance = Math.max(CAMERA_DISTANCE, FIT_HALF_WIDTH / tanHalfH);
-    camera.position.copy(LOOK_AT).addScaledVector(dir, distance);
-    camera.lookAt(LOOK_AT);
+    applyGarageFraming(camera, width > 0 && height > 0 ? width / height : 16 / 9);
   }
   resize(16, 9);
 

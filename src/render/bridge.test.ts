@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { applyPose } from './bridge';
-import { createCarModel, type CarModel } from './carModel';
+import { DEFAULT_ENV_INTENSITY, createCarModel, type CarModel } from './carModel';
+import {
+  GARAGE_PODIUM_OUTER_RADIUS, GARAGE_ROOM_APOTHEM, applyGarageFraming, garageCameraFraming,
+} from './garageScene';
 import { TUNING } from '../shared/tuning';
 import type { CarState } from '../shared/types';
 
@@ -172,16 +175,42 @@ describe('car model', () => {
     expect(named(brake, 'body').rotation.x).toBeGreaterThan(0.01);
   });
 
-  it('ignores teleports and non-finite input, and reset() levels the body', () => {
+  it('turns a hard hit into a capped jolt instead of snapping the body level', () => {
     const model = createCarModel();
-    run(model, (i) => carState({ vx: i * 0.2, vz: 30 }), 10);
-    model.update(carState({ vz: 0 }), 1 / 60); // respawn: speed 30 -> 0 in one frame
-    model.update(carState({ vz: Number.NaN }), 1 / 60);
+    run(model, (i) => carState({ vx: i * 0.2, vz: 30 }), 40); // steady left accel: body rolled
     const body = named(model, 'body');
+    const rollBefore = body.rotation.z;
+    expect(rollBefore).toBeGreaterThan(0.05);
+    let maxPitch = 0;
+    model.update(carState({ vx: 7.8, vz: 9 }), 1 / 60); // barrier: 30 -> 9 m/s in one frame
+    expect(body.rotation.z).toBeGreaterThan(rollBefore * 0.8); // no snap to level
+    for (let i = 0; i < 60; i++) {
+      model.update(carState({ vx: 7.8, vz: 9 }), 1 / 60);
+      maxPitch = Math.max(maxPitch, body.rotation.x);
+    }
+    expect(maxPitch).toBeGreaterThan(0.025); // visible nose dive under the hit
+    expect(maxPitch).toBeLessThan(0.15); // capped (2 * MAX_PITCH clamp in the model)
+  });
+
+  it('ignores non-finite input (forwardSpeed included); reset() levels the body and straightens the wheels', () => {
+    const model = createCarModel();
+    run(model, (i) => carState({ vx: i * 0.2, vz: 15, steer: 1, forwardSpeed: 15 }), 30);
+    model.update(carState({ vz: Number.NaN }), 1 / 60);
+    model.update(carState({ steer: 1, forwardSpeed: Number.NaN }), 1 / 60);
+    model.update(carState({ steer: 1 }), Number.NaN);
+    model.update(carState({ steer: 1, vz: 15, forwardSpeed: 15 }), Number.POSITIVE_INFINITY);
+    const body = named(model, 'body');
+    const fl = named(model, 'wheelFL');
     expect(Number.isFinite(body.rotation.x) && Number.isFinite(body.rotation.z)).toBe(true);
-    expect(Math.abs(body.rotation.x)).toBeLessThan(0.01);
+    expect(Number.isFinite(fl.rotation.y)).toBe(true);
+    expect(fl.rotation.y).toBeGreaterThan(0.1);
     model.reset();
+    expect(body.rotation.x).toBe(0);
     expect(body.rotation.z).toBe(0);
+    expect(fl.rotation.y).toBe(0);
+    model.update(carState({ steer: 0.5, vz: 5, forwardSpeed: 5 }), 1 / 60);
+    expect(Number.isFinite(fl.rotation.y)).toBe(true);
+    expect(fl.rotation.y).toBeGreaterThan(0);
   });
 
   it('stays cheap: body merged per material, one mesh per wheel', () => {
@@ -206,5 +235,69 @@ describe('car model', () => {
       }
     });
     expect(paints).toEqual([0x3366ff]);
+  });
+
+  it('setEnvMap puts reflections on the paint only', () => {
+    const model = createCarModel();
+    const tex = new THREE.Texture();
+    model.setEnvMap(tex);
+    model.root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const mat = o.material as THREE.Material;
+      if (mat instanceof THREE.MeshStandardMaterial) {
+        expect(mat.envMap).toBe(tex);
+        expect(mat.envMapIntensity).toBe(DEFAULT_ENV_INTENSITY);
+      } else {
+        expect('envMap' in mat ? mat.envMap : null).toBeNull();
+      }
+    });
+    model.setEnvMap(null, 0.6);
+    model.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) {
+        expect(o.material.envMap).toBeNull();
+        expect(o.material.envMapIntensity).toBe(0.6);
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Garage camera framing (pure maths; the scene itself needs a WebGL renderer).
+// ---------------------------------------------------------------------------
+
+describe('garage camera framing', () => {
+  const aspects = [0.5, 0.6, 0.75, 0.889, 1, 1.25, 4 / 3, 1.6, 16 / 9, 2, 2.4, 3];
+
+  it.each(aspects)('aspect %f keeps the camera inside the room', (aspect) => {
+    const cam = new THREE.PerspectiveCamera();
+    applyGarageFraming(cam, aspect);
+    expect(Math.hypot(cam.position.x, cam.position.z)).toBeLessThan(GARAGE_ROOM_APOTHEM - 0.5);
+    expect(cam.position.y).toBeGreaterThan(1);
+  });
+
+  it.each(aspects)('aspect %f shows the whole podium', (aspect) => {
+    const cam = new THREE.PerspectiveCamera();
+    applyGarageFraming(cam, aspect);
+    cam.updateMatrixWorld(true);
+    const r = GARAGE_PODIUM_OUTER_RADIUS;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      for (const y of [0, 0.6]) {
+        const p = new THREE.Vector3(Math.sin(a) * r, y, Math.cos(a) * r).project(cam);
+        expect(Math.abs(p.x)).toBeLessThan(1);
+        expect(Math.abs(p.y)).toBeLessThan(1);
+      }
+    }
+  });
+
+  it('uses the base FOV on wide screens and widens it (capped) only on narrow ones', () => {
+    const wide = garageCameraFraming(16 / 9);
+    expect(garageCameraFraming(21 / 9).fov).toBe(wide.fov);
+    expect(garageCameraFraming(4 / 3).fov).toBe(wide.fov);
+    const half = garageCameraFraming(960 / 1080);
+    expect(half.fov).toBeGreaterThan(wide.fov);
+    expect(garageCameraFraming(0.2).fov).toBeLessThanOrEqual(75);
+    expect(garageCameraFraming(Number.NaN)).toEqual(wide);
+    expect(garageCameraFraming(0)).toEqual(wide);
   });
 });

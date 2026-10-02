@@ -17,17 +17,29 @@ export interface CarModel {
   /** Built facing +Z, origin at ground centre. Pose it with bridge.applyPose(). */
   root: THREE.Group;
   /**
-   * Wheels steer by car.steer (counter-steering toward the velocity while drifting), spin by car.wheelSpin;
-   * body rolls with lateral accel, pitches with accel (derived from the velocity change between calls).
+   * Front wheels: in 'grip' mode they steer by car.steer (softened with speed); in 'drift' mode they
+   * counter-steer toward the velocity (-slip * COUNTER_STEER_GAIN + a DRIFT_STEER_SHARE of car.steer), which
+   * is what makes a drift read as a drift. Wheels spin by car.wheelSpin; the body rolls with lateral accel
+   * and pitches with accel (from the velocity change between calls, capped so hard hits give a short jolt).
    * dt <= 0 snaps the front wheels to the state and leaves the suspension untouched.
    */
   update(car: CarState, dt: number): void;
   setColor(hex: number): void;
-  /** Settle the suspension instantly (call after a respawn / teleport or when reusing the model). */
+  /**
+   * Reflections for the paint only (the only MeshStandardMaterial). Do not use `scene.environment` for
+   * this: in three r186 it also adds image-based diffuse light to every Lambert/Phong surface.
+   */
+  setEnvMap(tex: THREE.Texture | null, intensity?: number): void;
+  /**
+   * Settle the model instantly: level body, straight front wheels. Call on respawn / teleport (the
+   * session's `teleported` flag) or when reusing the model; update() never resets on its own.
+   */
   reset(): void;
 }
 
 export const DEFAULT_CAR_COLOR = 0xf0573a;
+/** Default paint reflection strength for setEnvMap(). */
+export const DEFAULT_ENV_INTENSITY = 0.35;
 
 // ---- Visual-only constants (not gameplay tuning) ----
 const WHEEL_WIDTH = 0.35;
@@ -46,8 +58,11 @@ const MAX_ROLL = 0.12;
 const MAX_PITCH = 0.07;
 const MAX_ACCEL = 30;
 const ACCEL_SMOOTHING = 14;
-/** Velocity jump treated as a teleport (respawn), m/s per update. */
-const TELEPORT_DV = 20;
+/** Velocity change beyond MAX_ACCEL * dt (hits) kicks the tilt springs: rad/s per m/s, and its cap. */
+const IMPACT_GAIN = 0.05;
+const MAX_IMPACT_RATE = 1.2;
+/** Longest frame the suspension integrates (s); longer gaps (tab switch, debugger) are truncated. */
+const MAX_UPDATE_DT = 0.1;
 /** Suspension spring: natural frequency (rad/s) and damping ratio (slightly under-damped toy bounce). */
 const SPRING_OMEGA = 13;
 const SPRING_ZETA = 0.5;
@@ -281,23 +296,29 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
     roll.value = roll.vel = pitch.value = pitch.vel = 0;
     accF = accL = 0;
     hasPrev = false;
+    steerAngle = 0;
     body.rotation.set(0, 0, 0);
+    for (const w of wheels) w.pivot.rotation.y = 0;
   }
 
   function updateSuspension(car: CarState, dt: number): void {
-    const dvx = car.vx - prevVx;
-    const dvz = car.vz - prevVz;
-    const teleported = dvx * dvx + dvz * dvz > TELEPORT_DV * TELEPORT_DV;
-    if (hasPrev && !teleported) {
-      const ax = dvx / dt;
-      const az = dvz / dt;
+    if (hasPrev) {
       const sin = Math.sin(car.heading);
       const cos = Math.cos(car.heading);
+      const dvx = car.vx - prevVx;
+      const dvz = car.vz - prevVz;
+      const dvF = dvx * sin + dvz * cos;
+      const dvL = dvx * cos - dvz * sin;
+      // Accelerations above MAX_ACCEL (hits, unreported teleports) are capped; the excess velocity change
+      // kicks the springs directly (capped too), so a hard hit reads as a short jolt, never a snap.
+      const cap = MAX_ACCEL * dt;
+      const capF = clamp(dvF, -cap, cap);
+      const capL = clamp(dvL, -cap, cap);
       const k = damp(ACCEL_SMOOTHING, dt);
-      accF += (clamp(ax * sin + az * cos, -MAX_ACCEL, MAX_ACCEL) - accF) * k;
-      accL += (clamp(ax * cos - az * sin, -MAX_ACCEL, MAX_ACCEL) - accL) * k;
-    } else if (teleported) {
-      reset();
+      accF += (capF / dt - accF) * k;
+      accL += (capL / dt - accL) * k;
+      pitch.vel += clamp((capF - dvF) * IMPACT_GAIN, -MAX_IMPACT_RATE, MAX_IMPACT_RATE);
+      roll.vel += clamp((dvL - capL) * IMPACT_GAIN, -MAX_IMPACT_RATE, MAX_IMPACT_RATE);
     }
     prevVx = car.vx;
     prevVz = car.vz;
@@ -309,7 +330,8 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
   }
 
   function update(car: CarState, dt: number): void {
-    if (!Number.isFinite(car.vx + car.vz + car.heading + car.steer + car.slip + car.wheelSpin)) return;
+    const inputs = car.vx + car.vz + car.heading + car.steer + car.slip + car.wheelSpin + car.forwardSpeed;
+    if (!Number.isFinite(inputs) || Number.isNaN(dt)) return;
     const maxAngle = TUNING.car.maxSteerAngle;
     const target =
       car.mode === 'drift'
@@ -321,7 +343,7 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
       if (w.front) w.pivot.rotation.y = steerAngle;
       w.spin.rotation.x = spin;
     }
-    if (dt > 0) updateSuspension(car, dt);
+    if (dt > 0) updateSuspension(car, Math.min(dt, MAX_UPDATE_DT));
   }
 
   return {
@@ -330,6 +352,14 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
     reset,
     setColor(hex: number): void {
       mats.paint.color.setHex(hex);
+    },
+    setEnvMap(tex: THREE.Texture | null, intensity: number = DEFAULT_ENV_INTENSITY): void {
+      const paint = mats.paint;
+      if (paint.envMap !== tex) {
+        paint.envMap = tex;
+        paint.needsUpdate = true; // the shader program depends on the env map's presence
+      }
+      paint.envMapIntensity = intensity;
     },
   };
 }
