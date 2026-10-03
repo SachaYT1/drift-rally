@@ -63,6 +63,7 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-nav__item[aria-current='page'] { font-family: var(--dr-head); font-size: 1.45em; letter-spacing: 0.02em; color: var(--dr-text); cursor: default; }
 .dr-nav__item[aria-current='page']::after, .dr-nav__item.is-open::after { content: ''; position: absolute; left: 50%; bottom: -0.35em; width: 0.4em; height: 0.4em; border-radius: 50%; background: var(--dr-coral); transform: translateX(-50%); }
 .dr-topbar__end { display: flex; align-items: center; gap: 1.1em; }
+.dr-version { position: absolute; left: 1.6em; bottom: 1.1em; font-size: .72em; letter-spacing: .08em; color: rgba(246, 240, 237, .38); pointer-events: none; font-variant-numeric: tabular-nums; }
 .dr-sound { display: inline-flex; align-items: center; gap: 0.4em; padding: 0.4em 0.5em 0.4em 0.55em; border: 1px solid var(--dr-border); border-radius: 0.6em; background: none; transition: border-color 0.15s, color 0.15s; }
 .dr-sound:hover { border-color: var(--dr-coral); }
 .dr-sound .dr-key { font-size: 0.68em; }

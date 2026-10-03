@@ -44,6 +44,13 @@ describe('garage UI (jsdom)', () => {
     return q('.dr-modal');
   };
 
+  it('shows the game version from package.json in the corner', async () => {
+    const { readFileSync } = await import('node:fs');
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    mount();
+    expect(q('.dr-version').textContent).toBe(`v${pkg.version}`);
+  });
+
   describe('rules modal', () => {
     const driftNotes = (modal: HTMLElement): string[] =>
       [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());

@@ -5,6 +5,7 @@ import { TUNING } from '../shared/tuning';
 import { formatPoints, formatTime, pluralRu } from './format';
 import { mountFriends, type FriendsView } from './leaderboardView';
 import { COIN_HTML, LOGO_HTML, createLayer, escapeHtml, isInteractiveTarget, isTextField, keyHtml, play, qs } from './screens';
+import { APP_VERSION } from '../shared/version';
 
 export interface GarageUI {
   /** New save: coins pop in the wallet, records and the sound toggle follow it. */
@@ -133,6 +134,7 @@ export function createGarageUI(
         <div class="dr-wallet" title="Монеты">${COIN_HTML}<span class="dr-wallet__n dr-num"></span></div>
       </div>
     </header>
+    <div class="dr-version" aria-label="Версия игры">v${escapeHtml(APP_VERSION)}</div>
     <section class="dr-panel dr-car">
       <div class="dr-eyebrow">Ваша машина</div>
       <h1 class="dr-h dr-car__name">Искра</h1>
