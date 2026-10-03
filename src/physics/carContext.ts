@@ -84,7 +84,8 @@ function surfaceParams(kind: SurfaceKind, t: Tuning): SurfaceParams {
 
 /**
  * Throttle, brake / reverse and drag along one axis (grip mode: the body axis; drift-exit phase: the
- * direction of travel).
+ * direction of travel). Space held (handbrake) locks the rear wheels: no engine drive, and a light braking
+ * (drift.handbrakeGripDecel) toward 0 on top of the drag.
  */
 export function integrateLongitudinal(
   vf0: number,
@@ -93,18 +94,19 @@ export function integrateLongitudinal(
 ): { vf: number; reverseHold: number } {
   const car = c.t.car;
   const dt = c.dt;
+  const throttle = c.handbrake ? 0 : c.throttle;
   let vf = Math.abs(vf0) < FORWARD_SPEED_EPSILON ? 0 : vf0;
 
   // Throttle while rolling backwards brakes toward 0; the rest of the step after stopping drives forward.
   let driveTime = dt;
-  if (vf < 0 && c.throttle > 0) {
-    const stopTime = -vf / (car.brakeDecel * c.throttle);
+  if (vf < 0 && throttle > 0) {
+    const stopTime = -vf / (car.brakeDecel * throttle);
     driveTime = Math.max(0, dt - stopTime);
-    vf = stopTime < dt ? 0 : vf + car.brakeDecel * c.throttle * dt;
+    vf = stopTime < dt ? 0 : vf + car.brakeDecel * throttle * dt;
   }
   if (vf >= 0) {
     const ratio = vf / c.surf.maxSpeed;
-    vf += car.engineAccel * c.throttle * (1 - ratio * ratio) * driveTime;
+    vf += car.engineAccel * throttle * (1 - ratio * ratio) * driveTime;
   }
 
   // reverseHold counts only while the brake is held near standstill.
@@ -120,7 +122,8 @@ export function integrateLongitudinal(
     }
   }
 
-  const drag = (car.rollingResistance + c.surf.dragExtra + car.airDrag * vf * vf) * dt;
+  const handbrake = c.handbrake ? c.t.drift.handbrakeGripDecel : 0;
+  const drag = (car.rollingResistance + c.surf.dragExtra + handbrake + car.airDrag * vf * vf) * dt;
   vf = vf > 0 ? Math.max(0, vf - drag) : Math.min(0, vf + drag);
   return { vf, reverseHold };
 }

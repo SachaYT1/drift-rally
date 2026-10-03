@@ -190,11 +190,16 @@ describe('car physics: drift path control', () => {
   });
 
   it('Space held tightens the arc (handbrakeCurvBoost)', () => {
+    // Per metre travelled: Space held also bleeds speed (no engine drive), so the car covers less ground.
     for (const u of [0, 1]) {
-      const free = trace(drift(1), steps(1), () => inp({ throttle: 1, steer: u }));
-      const space = trace(drift(1), steps(1), () => inp({ throttle: 1, steer: u, handbrake: true }));
-      const turn = (t: CarState[]) => wrapAngle(Math.atan2(last(t).vx, last(t).vz) - Math.atan2(t[0].vx, t[0].vz));
-      expect(turn(space), `u ${u}`).toBeGreaterThan(turn(free) * 1.1);
+      const start = drift(1);
+      const free = trace(start, steps(1), () => inp({ throttle: 1, steer: u }));
+      const space = trace(start, steps(1), () => inp({ throttle: 1, steer: u, handbrake: true }));
+      const curvature = (t: CarState[]) => {
+        const metres = [start, ...t.slice(0, -1)].reduce((m, s) => m + s.speed * DT, 0);
+        return wrapAngle(Math.atan2(last(t).vx, last(t).vz) - Math.atan2(start.vx, start.vz)) / metres;
+      };
+      expect(curvature(space), `u ${u}`).toBeGreaterThan(curvature(free) * 1.1);
     }
   });
 });

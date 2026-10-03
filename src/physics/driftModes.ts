@@ -36,11 +36,12 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
   }
 
   if (s.mode === 'grip') {
-    // A Space press kicks; holding Space (not drifting) kicks as soon as the other conditions hold.
-    // Zero steer never kicks, so a live-edited kickSteerThreshold of 0 cannot pick a side. The brake
-    // blocks the kick: S ends a drift, so Space + S would flap between drift and grip.
+    // A Space press kicks; holding Space (not drifting) kicks as soon as the other conditions hold, on W only:
+    // without throttle the drift lift-exits after exitDelay, and a held Space would kick it again at once, so
+    // Space alone would sustain the slide. Zero steer never kicks, so a live-edited kickSteerThreshold of 0
+    // cannot pick a side. The brake blocks the kick: S ends a drift, so Space + S would flap between drift and grip.
     const kick =
-      (c.handbrakePressed || c.handbrake) &&
+      (c.handbrakePressed || (c.handbrake && c.throttle >= d.throttleMin)) &&
       !braking &&
       c.speed >= d.minSpeed &&
       c.vf > 0 &&
@@ -55,9 +56,10 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
 
   // Drift.
   if (c.speed < d.minSpeed * d.holdSpeedFactor || c.vf <= 0) return exitDrift(cur, c);
-  // Exit timer: S held ends the drift after brakeExitTime; throttle and Space both released after exitDelay.
+  // Exit timer: S held ends the drift after brakeExitTime; throttle released after exitDelay, Space held or not
+  // (only throttle sustains a drift; Space held bleeds speed until the low-speed exit above).
   let modeTimer = 0;
-  if (braking || (c.throttle < d.throttleMin && !c.handbrake)) {
+  if (braking || c.throttle < d.throttleMin) {
     modeTimer = s.modeTimer + c.dt;
     if (modeTimer >= (braking ? d.brakeExitTime : d.exitDelay)) return exitDrift(cur, c);
   }
@@ -124,12 +126,13 @@ export function integrateDrift(c: StepContext, m: Pick<ModeStep, 'driftDir' | 'd
   const pathRate = c.speed * curvature;
   const phiNew = c.phi + pathRate * c.dt;
 
+  // Space held locks the rear wheels: no engine drive, and the handbrake bleeds speed (spec §2.3).
+  const drive = c.handbrake ? -d.handbrakeDecel : d.thrust * c.throttle * driftThrustScale(c, baseCurv);
   const accel =
     -(d.dragBase + d.dragSlip * Math.abs(Math.sin(c.slip))) -
     c.surf.dragExtra -
-    (c.handbrake ? d.handbrakeDecel : 0) -
     d.brakeFactor * c.t.car.brakeDecel * c.brake +
-    d.thrust * c.throttle * driftThrustScale(c, baseCurv);
+    drive;
   const speed = Math.max(0, capDriftSpeed(c.speed, c.speed + accel * c.dt, d.maxSpeedFactor * c.surf.maxSpeed, c));
 
   // Body: rate-limited tracking of (velocity heading + target slip), on top of the path rotation.

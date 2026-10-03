@@ -67,7 +67,16 @@ export const TUNING = {
      * drift target (smoothstep). The kick swings the body into the slide at once without yanking the path.
      */
     entryBlendTime: 0.4,
-    handbrakeDecel: 3,
+    /**
+     * Space held in a drift (spec §2.3): the rear wheels lock, so there is no engine drive and the speed bleeds
+     * at this rate on top of the drift drag (dragBase + dragSlip*|sin slip|, ~5-7.6), m/s^2: ~10.5-12.5 in
+     * total. Holding W + Space reaches the low-speed exit in ~1.5-1.8 s from 25 m/s, ~1.9-2.2 s from 30 m/s
+     * (a neutral drift on W); a 0.2 s tap costs ~2.3 m/s. Space is for kicking and tightening, never for
+     * sustaining.
+     */
+    handbrakeDecel: 5,
+    /** Space held in grip (below drift speed, no steer, the exit phase): no engine drive, light braking, m/s^2. */
+    handbrakeGripDecel: 4,
     /** Body yaw tracking toward (velocity heading + target slip). */
     bodyResponse: 8,
     bodyMaxYawRate: 4,
@@ -85,7 +94,7 @@ export const TUNING = {
     topStraight: 0.75,
     /** Drift speed cap as a fraction of car.maxSpeed. */
     maxSpeedFactor: 0.9,
-    /** Seconds without throttle and handbrake before the drift ends. */
+    /** Seconds without throttle before the drift ends (Space held or not: only throttle sustains a drift). */
     exitDelay: 0.25,
     /** Seconds for lateral grip (and, during the exit phase, steering authority) to blend back after a drift. */
     gripBlendTime: 0.3,
@@ -103,7 +112,8 @@ export const TUNING = {
      * released ends the drift. Counted while both the input and the wheel (smoothed steer, which sets the
      * path curvature) are at full counter-steer, so a keyboard counter-steer first slides on a slightly
      * outward path for catchTime (~0.5 s from the key press out of a neutral drift). Partial counter-steer
-     * keeps drifting; Space held keeps the slide.
+     * keeps drifting; Space held keeps the slide (locked rear wheels), which then bleeds speed (handbrakeDecel)
+     * until the low-speed exit.
      */
     catchSteer: 0.85,
     catchTime: 0.3,
