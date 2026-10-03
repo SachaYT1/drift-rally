@@ -22,6 +22,7 @@ describe('autopilot', () => {
     expect(st.result!.totalPoints).toBeGreaterThan(0);
     expect(st.result!.coinsPicked).toBeGreaterThan(0);
     expect(events.filter((e) => e.type === 'respawn')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'bomb')).toHaveLength(0);
     expect(events.some((e) => e.type === 'chainBanked' && e.points > 0)).toBe(true);
   });
 
@@ -37,6 +38,7 @@ describe('autopilot', () => {
     expect(events.filter((e) => e.type === 'hit').length).toBeLessThanOrEqual(1);
     expect(events.filter((e) => e.type === 'chainBurned').length).toBeLessThanOrEqual(1);
     expect(events.filter((e) => e.type === 'respawn')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'bomb')).toHaveLength(0);
     expect(r.totalPoints).toBeGreaterThan(15000);
     expect(r.lapTimes).toHaveLength(3);
     for (const lap of r.lapTimes) expect(lap).toBeLessThan(60);

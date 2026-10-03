@@ -1,6 +1,6 @@
 /**
- * Session -> drift score wiring (spec §2.4): the finish banks the open chain, a respawn or a heavy hit
- * burns it, a knocked light prop costs banked points, and a 0-point chain is still reported.
+ * Session -> drift score wiring (spec §2.4): the finish banks the open chain, a respawn, a heavy hit or a
+ * bomb burns it, a knocked light prop costs banked points, and a 0-point chain is still reported.
  * Every scenario runs on the walless circle test track with a closed-loop driver that holds the
  * centreline, and is located by conditions (chain state, surface), never by fixed race times, so
  * drift tuning passes do not move the scenarios off the road or out of the chain.
@@ -11,7 +11,7 @@ import { makeCircleTrack } from './testTracks';
 import { DT } from './testSession';
 import { TUNING, type Tuning } from '../shared/tuning';
 import { clamp, wrapAngle } from '../shared/math';
-import { NEUTRAL_INPUT, type Collider, type GameEvent, type InputFrame, type LightPropSpot } from '../shared/types';
+import { NEUTRAL_INPUT, type BombSpot, type Collider, type GameEvent, type InputFrame, type LightPropSpot } from '../shared/types';
 
 const D = TUNING.drift;
 /**
@@ -77,7 +77,7 @@ interface Step {
 }
 
 /** One-lap race on the circle track (optionally with obstacles), past the countdown. */
-function driftSession(extras: { walls?: Collider[]; lightProps?: LightPropSpot[] } = {}, tuning?: Tuning): Session {
+function driftSession(extras: { walls?: Collider[]; lightProps?: LightPropSpot[]; bombs?: BombSpot[] } = {}, tuning?: Tuning): Session {
   const sess = createSession(makeCircleTrack(RADIUS, extras), { laps: 1, tuning });
   while (sess.state().phase === 'countdown') sess.step(NEUTRAL_INPUT, { respawn: false }, DT);
   return sess;
@@ -164,6 +164,41 @@ describe('session: drift score wiring', () => {
     expect(crash.st.car.mode).toBe('recover');
     expect(crash.st.score.phase).toBe('idle');
     expect(crash.st.score.totalPoints).toBe(crash.prev.score.totalPoints);
+  });
+
+  it('a bomb in the middle of a drift blows once, burns the chain and starts the wrong-way grace', () => {
+    // A bomb on the obstacle-free drift's path, where that chain is surely open.
+    const ref = driveUntil(driftSession(), true, midChain)!;
+    expect(ref).not.toBeNull();
+    const bomb: BombSpot = { id: 'bomb-1', x: ref.st.car.x, z: ref.st.car.z, r: TUNING.bomb.radius };
+    const sess = driftSession({ bombs: [bomb] });
+    const blast = driveUntil(sess, true, has('bomb'))!;
+    expect(blast).not.toBeNull();
+    expect(blast.prev.score.phase).toBe('active');
+    const ev = blast.events;
+    expect(ev).toContainEqual({ type: 'bomb', id: 'bomb-1', x: bomb.x, z: bomb.z });
+    expect(types(ev).indexOf('chainBurned')).toBeGreaterThan(types(ev).indexOf('bomb'));
+    expect(ev).toContainEqual({ type: 'chainBurned', points: Math.round(blast.prev.score.chainPoints) });
+    expect(blast.st.car.mode).toBe('recover');
+    expect(blast.st.car.speed).toBeLessThan(blast.prev.car.speed);
+    expect(blast.st.progress.graceTimer).toBeGreaterThan(TUNING.progress.graceTime - 2 * DT);
+    expect(blast.st.bombs.blown.has('bomb-1')).toBe(true);
+    expect(blast.st.score.totalPoints).toBe(blast.prev.score.totalPoints);
+    expect(driveUntil(sess, true, has('bomb'), 5)).toBeNull(); // gone for the rest of the lap
+    sess.step(NEUTRAL_INPUT, { respawn: true }, DT);
+    expect(sess.state().bombs.blown.has('bomb-1')).toBe(true); // a respawn does not bring it back
+  });
+
+  it('a bomb comes back on the next lap; a blast with no chain open burns nothing', () => {
+    const at = makeCircleTrack(RADIUS).poseAt(Math.PI * RADIUS, 0); // half a lap from the start
+    const bomb: BombSpot = { id: 'bomb-1', x: at.x, z: at.z, r: TUNING.bomb.radius };
+    const sess = createSession(makeCircleTrack(RADIUS, { bombs: [bomb] }), { laps: 2 });
+    while (sess.state().phase === 'countdown') sess.step(NEUTRAL_INPUT, { respawn: false }, DT);
+    const events: GameEvent[] = [];
+    driveUntil(sess, false, (s) => (events.push(...s.events), false), 240);
+    expect(sess.state().phase).toBe('finished');
+    expect(events.filter((e) => e.type === 'bomb')).toHaveLength(2);
+    expect(types(events)).not.toContain('chainBurned');
   });
 
   it('a knocked light prop costs propPenalty from the banked total and the chain survives', () => {

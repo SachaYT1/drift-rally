@@ -116,6 +116,33 @@ describe('track build (plaza)', () => {
     }
   });
 
+  it('bombs sit on the road with a free passage, clear of pickups, obstacles and respawn poses', () => {
+    const H = TUNING.track.roadHalfWidth;
+    const CLEAR = 5;
+    const poses = [track.spawnPose, ...track.respawnMarkers.map((s) => track.poseAt(s, 0))];
+    expect(track.bombs).toHaveLength(4);
+    for (const b of track.bombs) {
+      const lat = track.project(b.x, b.z).lateral;
+      expect(Math.abs(lat) + b.r).toBeLessThanOrEqual(H);
+      expect(Math.max(H - (lat + b.r), lat - b.r + H)).toBeGreaterThanOrEqual(TUNING.track.minFreeWidth);
+      const gap = (x: number, z: number, r: number) => Math.hypot(x - b.x, z - b.z) - r - b.r;
+      for (const c of track.coins) expect(gap(c.x, c.z, TUNING.pickups.coinRadius)).toBeGreaterThanOrEqual(CLEAR);
+      for (const p of track.lightProps) expect(gap(p.x, p.z, p.r)).toBeGreaterThanOrEqual(CLEAR);
+      for (const c of track.heavyColliders) {
+        if (c.kind === 'wall') continue;
+        const seg = c.kind === 'circle' ? { ax: c.x, az: c.z, bx: c.x, bz: c.z } : c;
+        const inflated = { ax: seg.ax, az: seg.az, bx: seg.bx, bz: seg.bz, r: c.r + CLEAR };
+        expect(capsuleOverlapsCircle(inflated, b.x, b.z, b.r)).toBe(false);
+      }
+      for (const p of poses) {
+        const ox = Math.sin(p.heading) * TUNING.car.capsuleHalf;
+        const oz = Math.cos(p.heading) * TUNING.car.capsuleHalf;
+        const cap = { ax: p.x + ox, az: p.z + oz, bx: p.x - ox, bz: p.z - oz, r: TUNING.car.radius };
+        expect(capsuleOverlapsCircle(cap, b.x, b.z, b.r)).toBe(false);
+      }
+    }
+  });
+
   it('tall decor keeps out of the camera corridor unless tagged as an occluder', () => {
     for (const d of track.decor) {
       if (VISUAL_HEIGHT[d.def.visual] <= TUNING.track.tallDecorHeight || d.def.occluder) continue;
@@ -188,6 +215,7 @@ const CIRCLE: TrackDef = {
     { id: 'c', kind: 'can', s: 50, lateral: 2 },
     { id: 'u', kind: 'cup', s: 60, lateral: -2 },
   ],
+  bombs: [{ id: 'b', s: 150, lateral: 1.5 }],
   coins: [
     { s: 10, lateral: 1, count: 3, spacing: 5 },
     { s: 200, lateral: -1, count: 2, spacing: 4 },
@@ -294,6 +322,11 @@ describe('track build (synthetic circle)', () => {
     expect(circle.spawnPose).toEqual(spawn);
     expect(circle.decor[0]).toMatchObject({ x: 0, z: 0 });
     expect(circle.ground).toEqual({ minX: -200, minZ: -190, maxX: 200, maxZ: 190 });
+  });
+
+  it('places bombs at (s, lateral) with the tuning radius', () => {
+    const p = circle.poseAt(150, 1.5);
+    expect(circle.bombs).toEqual([{ id: 'b', x: p.x, z: p.z, r: TUNING.bomb.radius }]);
   });
 
   it('builds closed inner (left) and outer barrier polylines at the barrier offset', () => {

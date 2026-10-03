@@ -27,6 +27,8 @@ export interface DriftScoreInput {
   progressSpeed: number;
   heavyHit: boolean;
   respawned: boolean;
+  /** A bomb blew up under the car this step. */
+  bombed: boolean;
   /** Number of light props knocked this step. */
   propsKnocked: number;
   /** Race just finished: bank the active chain. */
@@ -86,8 +88,8 @@ export function updateDriftScore(
   const events: GameEvent[] = [];
   let s: DriftScoreState = { ...state };
 
-  // 1. A heavy hit or a respawn burns the unbanked chain.
-  if ((input.heavyHit || input.respawned) && s.phase !== 'idle') {
+  // 1. A heavy hit, a bomb blast or a respawn burns the unbanked chain.
+  if ((input.heavyHit || input.respawned || input.bombed) && s.phase !== 'idle') {
     events.push({ type: 'chainBurned', points: Math.round(s.chainPoints) });
     s = resetChain(s);
   }

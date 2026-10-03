@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudio, MASTER_LEVEL, MAX_VOICES, type GameAudio } from './sfx';
 import { LOOP_DUCK } from './engine';
 import { DEFAULT_ENGINE_PRESET, enginePitch } from './enginePresets';
-import { FakeCtx, FakeGain, FakeNode, FakeOsc, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
+import { FakeBufferSource, FakeCtx, FakeGain, FakeNode, FakeOsc, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
 import { TUNING } from '../shared/tuning';
 import { DEG } from '../shared/math';
 import type { CarState, GameEvent, RaceResult } from '../shared/types';
@@ -19,7 +19,7 @@ const RESULT: RaceResult = { totalPoints: 4200, bestChain: 1800, totalTime: 180,
 
 const ALL_EVENTS: GameEvent[] = [
   { type: 'countdown', value: 3 }, { type: 'countdown', value: 0 }, COIN,
-  { type: 'propKnocked', id: 'c1', kind: 'can', x: 0, z: 0, vx: 1, vz: 1 },
+  { type: 'propKnocked', id: 'c1', kind: 'can', x: 0, z: 0, vx: 1, vz: 1 }, { type: 'bomb', id: 'b1', x: 0, z: 0 },
   { type: 'hit', impactSpeed: 12, x: 0, z: 0 }, { type: 'hit', impactSpeed: 1e6, x: 0, z: 0 }, { type: 'scrape', x: 0, z: 0 },
   { type: 'chainStart' }, { type: 'multiplier', value: 3 }, { type: 'chainBanked', points: 1240 },
   { type: 'chainBurned', points: 300 }, { type: 'penalty', points: 100 },
@@ -186,6 +186,17 @@ describe('audio graph (fake AudioContext)', () => {
       expect(deduction.pitches).toEqual(cue);
       expect(deduction.peak).toBeLessThan(knock.peak);
     });
+  });
+
+  it('a bomb booms: a deep thump under a noise burst', async () => {
+    const { ctx, audio } = await started();
+    const n0 = ctx.nodes.length;
+    audio.onEvent({ type: 'bomb', id: 'b1', x: 0, z: 0 });
+    const fresh = ctx.nodes.slice(n0);
+    const pitches = fresh.filter((n): n is FakeOsc => n instanceof FakeOsc).map((o) => (o.frequency.calls[0] as Call).v);
+    expect(pitches.length).toBeGreaterThan(0);
+    expect(Math.min(...pitches)).toBeLessThan(150);
+    expect(fresh.some((n) => n instanceof FakeBufferSource)).toBe(true);
   });
 
   it('caps simultaneous one-shot voices and frees them on ended', async () => {

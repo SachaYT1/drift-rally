@@ -27,14 +27,22 @@ function lateralExtent(id: string): [number, number] {
 }
 
 describe('plaza map data', () => {
-  it('uses unique ids for heavy obstacles and light props', () => {
-    const ids = [...PLAZA.heavy.map((h) => h.id), ...PLAZA.light.map((l) => l.id)];
+  it('uses unique ids for heavy obstacles, light props and bombs', () => {
+    const ids = [...PLAZA.heavy.map((h) => h.id), ...PLAZA.light.map((l) => l.id), ...PLAZA.bombs.map((b) => b.id)];
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('authors every s inside one lap', () => {
-    const all = [...PLAZA.heavy, ...PLAZA.light, ...PLAZA.coins].map((d) => d.s);
+    const all = [...PLAZA.heavy, ...PLAZA.light, ...PLAZA.bombs, ...PLAZA.coins].map((d) => d.s);
     for (const s of all) expect(s >= 0 && s < track.length).toBe(true);
+  });
+
+  it('one bomb in each long drift, off the centreline', () => {
+    expect(PLAZA.bombs.map((b) => b.id)).toEqual(['bomb-fountain', 'bomb-bicycle', 'bomb-hairpin', 'bomb-corner']);
+    for (const b of PLAZA.bombs) {
+      expect(Math.abs(b.lateral)).toBeGreaterThanOrEqual(1.5);
+      expect(Math.abs(b.lateral)).toBeLessThanOrEqual(3.5);
+    }
   });
 
   it('bench legs straddle the road at lateral +/-5.5 and the bench fades as an occluder', () => {

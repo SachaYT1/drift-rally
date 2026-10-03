@@ -7,6 +7,7 @@ import { createPickups } from '../game/pickups';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import type { AssetLibrary } from '../core/assets';
+import { TUNING } from '../shared/tuning';
 
 // The scene-side consumers are irrelevant here (and need GPU-side assets): stub them.
 vi.mock('../render/world', () => ({ createWorld: () => ({ group: new THREE.Group(), occluders: [] }) }));
@@ -15,8 +16,9 @@ vi.mock('../render/props', () => ({
   createPropsLayer: () => ({ group: new THREE.Group(), update() {}, resetLap() {}, onEvent() {} }),
 }));
 vi.mock('../render/fx', () => ({ createFx: () => ({ update() {}, reset() {}, onEvent() {} }) }));
+const { hop } = vi.hoisted(() => ({ hop: vi.fn() }));
 vi.mock('../render/carModel', () => ({
-  createCarModel: () => ({ root: new THREE.Group(), update() {}, reset() {}, setEnvMap() {}, setColor() {} }),
+  createCarModel: () => ({ root: new THREE.Group(), update() {}, reset() {}, setEnvMap() {}, setColor() {}, hop }),
 }));
 
 const track = buildTrack(PLAZA);
@@ -36,5 +38,23 @@ describe('race scene shadows', () => {
       const ahead = { x: car.x + Math.sin(heading) * SHADOW_LEAD, z: car.z + Math.cos(heading) * SHADOW_LEAD };
       expect(Math.hypot(t.x - ahead.x, t.z - ahead.z)).toBeLessThan(texel * 2);
     }
+  });
+});
+
+describe('race scene bombs', () => {
+  it('shows the track bombs, hides blown ones; a blast hops the car and shakes the camera', () => {
+    const race = createRaceScene(fakeRenderer(), track, {} as AssetLibrary, 'medium', new THREE.Texture());
+    const layer = race.scene.getObjectByName('bombs')!;
+    expect(layer.children).toHaveLength(track.bombs.length);
+    const car = createCarState(0, 0, 0);
+    const blown = { blown: new Set([track.bombs[0].id]) };
+    race.sync({ car, surface: 'road', pickups: createPickups(), bombs: blown, simTime: 0, snap: true }, 0);
+    expect(layer.children.map((o) => o.visible)).toEqual(track.bombs.map((_, i) => i > 0));
+    race.reset();
+    expect(layer.children.every((o) => o.visible)).toBe(true);
+    const shake = vi.spyOn(race.chase, 'shake');
+    race.onEvent({ type: 'bomb', id: track.bombs[0].id, x: 0, z: 0 });
+    expect(hop).toHaveBeenCalledTimes(1);
+    expect(shake).toHaveBeenCalledWith(TUNING.camera.shakePerImpact * TUNING.bomb.shakeImpact);
   });
 });

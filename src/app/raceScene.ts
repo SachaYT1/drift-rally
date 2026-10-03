@@ -1,8 +1,8 @@
 /**
  * The race scene, built once during loading and reused by every race (retries never rebuild or dispose
- * anything): lighting environment, track surface, static world, props, effects, the car and the chase
+ * anything): lighting environment, track surface, static world, props, bombs, effects, the car and the chase
  * camera with the occlusion fader. sync() applies one render state; onEvent() routes session events to the
- * scene-side consumers (effects, props, camera shake).
+ * scene-side consumers (effects, props, camera shake, the car's bomb hop).
  */
 import * as THREE from 'three';
 import type { CarState, GameEvent, QualityLevel, SurfaceKind } from '../shared/types';
@@ -10,12 +10,14 @@ import { TUNING } from '../shared/tuning';
 import type { Track } from '../track/build';
 import type { AssetLibrary } from '../core/assets';
 import { createPickups, type PickupState } from '../game/pickups';
+import type { BombState } from '../game/bombs';
 import { createCarState } from '../physics/car';
 import { createRaceEnvironment, type RaceEnvironment } from '../render/environment';
 import { createTrackMesh } from '../render/trackMesh';
 import { createWorld } from '../render/world';
 import { createOcclusionFader, type OcclusionFader } from '../render/occlusion';
 import { createPropsLayer, type PropsLayer } from '../render/props';
+import { createBombsLayer } from '../render/bombs';
 import { createFx, type Fx } from '../render/fx';
 import { createChaseCamera, type ChaseCamera } from '../render/chaseCamera';
 import { createCarModel, type CarModel } from '../render/carModel';
@@ -35,6 +37,8 @@ export interface RaceFrame {
   effectsCar?: CarState;
   surface: SurfaceKind;
   pickups: PickupState;
+  /** Bombs blown this lap; absent (or null) shows every bomb. */
+  bombs?: BombState | null;
   /** Simulation clock for the coin animation, s (freezes while paused). */
   simTime: number;
   /** Teleport (race start, respawn): place camera and car model without smoothing. */
@@ -54,7 +58,7 @@ export interface RaceScene {
   reset(): void;
   /** Apply one render state; `dt` = seconds since the previous sync (frame or fixed step). */
   sync(f: RaceFrame, dt: number): void;
-  /** Effects, props and camera shake for one session event. */
+  /** Effects, props, camera shake and the car's bomb hop for one session event. */
   onEvent(e: GameEvent): void;
   setAspect(aspect: number): void;
   render(renderer: THREE.WebGLRenderer): void;
@@ -73,6 +77,8 @@ export function createRaceScene(
   scene.add(createTrackMesh(track), world.group);
   const props = createPropsLayer(track, assets);
   scene.add(props.group);
+  const bombs = createBombsLayer(track);
+  scene.add(bombs.group);
   const fx = createFx(scene);
   const car = createCarModel();
   // Paint reflections from the garage PMREM; never scene.environment (it would light every Lambert surface).
@@ -100,6 +106,7 @@ export function createRaceScene(
     fader.update(camera, carCentre, dt);
     fx.update(f.effectsCar ?? c, f.surface, dt);
     props.update(f.pickups, f.simTime, dt);
+    bombs.update(f.bombs ?? null, f.simTime);
   }
 
   function reset(): void {
@@ -114,6 +121,10 @@ export function createRaceScene(
     props.onEvent(e);
     if (e.type === 'lap') props.resetLap();
     else if (e.type === 'hit') chase.shake(TUNING.camera.shakePerImpact * e.impactSpeed);
+    else if (e.type === 'bomb') {
+      chase.shake(TUNING.camera.shakePerImpact * TUNING.bomb.shakeImpact);
+      car.hop();
+    }
   }
 
   reset();

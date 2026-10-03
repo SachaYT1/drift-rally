@@ -1,5 +1,5 @@
 /**
- * Race FX (plan Task 12): tyre smoke, skid marks, hit/scrape sparks and coin bursts.
+ * Race FX (plan Task 12): tyre smoke, skid marks, hit/scrape sparks, coin bursts and bomb blasts.
  * - Smoke / bursts: pooled camera-facing quads, one instanced draw each (unlit ShaderMaterial, per-instance
  *   position, colour+alpha, size; bursts stretch along screen-space velocity). Live particles are packed to the
  *   front of the buffers: instanceCount = live count, only that range is uploaded. depthWrite false.
@@ -21,7 +21,10 @@ import { SkidMarks, type Trail } from './skidMarks';
 export interface Fx {
   /** Smoke from rear wheels when drifting or hard braking; skid marks while sliding. `car` = render state. */
   update(car: CarState, surface: SurfaceKind, dt: number): void;
-  /** 'hit' → spark burst; 'scrape' → a few sparks; 'coin' → gold burst; 'respawn' → break skid trails. */
+  /**
+   * 'hit' → spark burst; 'scrape' → a few sparks; 'coin' → gold burst; 'bomb' → flash, sparks and soot;
+   * 'respawn' → break skid trails.
+   */
   onEvent(e: GameEvent): void;
   /** Remove all particles and skid marks. */
   reset(): void;
@@ -55,6 +58,7 @@ const MAX_DT = 0.1;
 const C = {
   smoke: new THREE.Color(0xf4f2f5), dust: new THREE.Color(0xe6dccb), hot: new THREE.Color(0xffd84a),
   cool: new THREE.Color(0xff5a0a), gold: new THREE.Color(0xffcf3a), pale: new THREE.Color(0xfff3c4),
+  blast: new THREE.Color(0xffa040), soot: new THREE.Color(0x3d3936),
 };
 
 /** Particle look: random life (s), start size (m) and growth factor ranges; drag 1/s; gravity m/s^2 (< 0 rises). */
@@ -64,6 +68,12 @@ const SMOKE: Preset = { life: [0.9, 1.5], size: [0.8, 1.3], grow: [2.6, 3.8], dr
 const SPARK: Preset = { life: [0.25, 0.6], size: [0.2, 0.32], grow: [1, 1], drag: 1.5, gravity: 22 };
 const SPARKLE: Preset = { life: [0.45, 0.75], size: [0.34, 0.42], grow: [0.6, 0.6], drag: 2.5, gravity: 8 };
 const FLASH: Preset = { life: [0.26, 0.26], size: [1.2, 1.2], grow: [3.2, 3.2], drag: 0, gravity: 0 };
+const BLAST_FLASH: Preset = { life: [0.36, 0.36], size: [3.4, 3.4], grow: [3, 3], drag: 0, gravity: 0 };
+const SOOT: Preset = { life: [1.2, 1.8], size: [1.2, 1.8], grow: [2.4, 3.2], drag: 1.8, gravity: -1.2 };
+/** Bomb blast: sparks (count, horizontal speed m/s) and soot puffs. */
+const BLAST_SPARKS = 32;
+const BLAST_SPARK_SPEED = 16;
+const BLAST_SMOKE = 10;
 
 const VERT = /* glsl */ `
 attribute vec3 iPos; attribute vec4 iColor; attribute float iSize;
@@ -258,6 +268,22 @@ export function createFx(scene: THREE.Scene): Fx {
     }
   }
 
+  /**
+   * Bomb blast: a big orange flash with a white-hot core, raised so it shows over the car seen from behind,
+   * a dense spark burst and dark soot thrown out and rolling up.
+   */
+  function blast(x: number, z: number): void {
+    bursts.spawn(BLAST_FLASH, x, 2, z, 0, 0, 0, 1, C.blast);
+    bursts.spawn(FLASH, x, 2.2, z, 0, 0, 0, 1, C.pale);
+    sparks(x, 0.6, z, BLAST_SPARKS, BLAST_SPARK_SPEED);
+    for (let i = 0; i < BLAST_SMOKE; i++) {
+      const a = rand() * TAU;
+      const hs = 1 + rand() * 2.5;
+      const px = x + Math.cos(a) * 0.6;
+      smoke.spawn(SOOT, px, 0.6 + rand() * 0.8, z + Math.sin(a) * 0.6, Math.cos(a) * hs, 2.5 + rand() * 2, Math.sin(a) * hs, 0.55, C.soot);
+    }
+  }
+
   return {
     update(car: CarState, surface: SurfaceKind, dt: number): void {
       if (!(dt > 0)) return;
@@ -294,6 +320,7 @@ export function createFx(scene: THREE.Scene): Fx {
       if (e.type === 'hit') sparks(e.x, 0.5, e.z, Math.round(clamp(6 + e.impactSpeed * 1.6, 10, 32)), clamp(e.impactSpeed, 6, 16));
       else if (e.type === 'scrape') sparks(e.x, 0.4, e.z, 5, 5);
       else if (e.type === 'coin') coinBurst(e.x, e.z);
+      else if (e.type === 'bomb') blast(e.x, e.z);
       else if (e.type === 'respawn') breakTrails();
     },
     reset(): void {

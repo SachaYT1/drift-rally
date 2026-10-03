@@ -199,6 +199,14 @@ export interface LightPropSpot {
   heading: number;
 }
 
+export interface BombSpot {
+  id: string;
+  x: number;
+  z: number;
+  /** Trigger radius, m (tuning.bomb.radius). */
+  r: number;
+}
+
 // ---------------------------------------------------------------------------
 // Game events (returned from session.step; consumed by HUD, audio, fx)
 // ---------------------------------------------------------------------------
@@ -207,6 +215,7 @@ export type GameEvent =
   | { type: 'countdown'; value: 3 | 2 | 1 | 0 }
   | { type: 'coin'; id: number; x: number; z: number }
   | { type: 'propKnocked'; id: string; kind: 'can' | 'cup'; x: number; z: number; vx: number; vz: number }
+  | { type: 'bomb'; id: string; x: number; z: number }
   | { type: 'hit'; impactSpeed: number; x: number; z: number }
   | { type: 'scrape'; x: number; z: number }
   | { type: 'chainStart' }

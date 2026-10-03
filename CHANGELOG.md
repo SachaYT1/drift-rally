@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-04
+
+### Добавлено
+- Бомбы на «Площади»: по одной в четырёх длинных поворотах, на линии заноса. Наезд взрывает бомбу:
+  машину отбрасывает и закручивает, незачтённая цепочка сгорает, как от сильного удара. Взорванная
+  бомба возвращается на следующем круге.
+
 ## [0.3.0] — 2026-10-03
 
 ### Добавлено
@@ -65,7 +72,8 @@
 - Синтезированный звук: двигатель с переключением передач, удары, монеты, отсчёт.
 - Экраны «нет WebGL» и «игра для компьютера с клавиатурой».
 
-[Unreleased]: https://github.com/SachaYT1/drift-rally/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SachaYT1/drift-rally/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SachaYT1/drift-rally/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SachaYT1/drift-rally/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SachaYT1/drift-rally/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/SachaYT1/drift-rally/compare/v0.1.0...v0.1.1

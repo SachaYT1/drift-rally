@@ -27,7 +27,7 @@ export interface GameAudio {
    * intensity (|slip|, speed). Uses setTargetAtTime.
    */
   update(car: CarState, throttle: number, drifting: boolean, dt: number): void;
-  onEvent(e: GameEvent): void; // coin, hit, scrape, propKnocked, penalty, chainBanked, chainBurned, countdown, lap, finish
+  onEvent(e: GameEvent): void; // coin, hit, scrape, propKnocked, bomb, penalty, chainBanked, chainBurned, countdown, lap, finish
   /**
    * Silence engine/screech (garage, results). They start INACTIVE: the race screen must call
    * `setEngineActive(true)` (e.g. at countdown start) to hear the engine.
@@ -205,6 +205,13 @@ export function createSfxPlayer(
     hiss({ filter: 'bandpass', hz: 800 + 400 * Math.random(), q: 1.4, peak: 0.55, attack: 0.012, hold: 0.05, release: 0.12 }, at);
   }
 
+  /** Bomb: a deep falling thump under a noise burst through a closing lowpass, plus a short crackle. */
+  function boom(at: number): void {
+    tone({ type: 'sine', hz: 120, toHz: 38, glide: 0.35, peak: 0.6, attack: 0.003, hold: 0.04, release: 0.5 }, at);
+    hiss({ filter: 'lowpass', hz: 3200, toHz: 140, q: 0.7, peak: 0.7, attack: 0.002, hold: 0.05, release: 0.6 }, at);
+    hiss({ filter: 'bandpass', hz: 2400, toHz: 900, q: 1.1, peak: 0.25, attack: 0.002, hold: 0.01, release: 0.18 }, at + 0.03);
+  }
+
   /** Deflating "bwaaow": two detuned saws gliding down through a closing lowpass. */
   function burned(at: number): void {
     const filter = ctx.createBiquadFilter();
@@ -270,6 +277,7 @@ export function createSfxPlayer(
           return true;
         case 'chainBurned': burned(at); return true;
         case 'propKnocked': knock(e.kind, at); return true;
+        case 'bomb': boom(at); return true;
         case 'penalty': penalty(at); return true;
         case 'lap':
           // The final lap is announced by the finish fanfare (same step).
