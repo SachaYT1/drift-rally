@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import type { SaveData } from '../shared/types';
 import { DEFAULT_SAVE } from '../core/save';
 import { TUNING } from '../shared/tuning';
+import { CARS, type CarId } from '../shared/cars';
 import { createGarageUI, type GarageUI } from './garage';
 import { enterGarage } from '../app/garageScreen';
 import type { App } from '../app/context';
@@ -186,6 +187,96 @@ describe('garage UI (jsdom)', () => {
       expect(onGhosts).toHaveBeenLastCalledWith(true);
       expect(btn.getAttribute('aria-checked')).toBe('true');
       expect(onMute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('car line-up', () => {
+    let onStart: ReturnType<typeof vi.fn<() => void>>;
+    let onBrowse: ReturnType<typeof vi.fn<(id: CarId) => void>>;
+    let onBuy: ReturnType<typeof vi.fn<(id: CarId) => boolean>>;
+
+    function mountCars(save: SaveData = SAVE, initialCar?: CarId): void {
+      onStart = vi.fn<() => void>();
+      onBrowse = vi.fn<(id: CarId) => void>();
+      onBuy = vi.fn<(id: CarId) => boolean>((id) => {
+        // What garageScreen does: the purchase comes back as a new save.
+        ui.update({ ...save, coins: save.coins - CARS[id].price, ownedCars: [...save.ownedCars, id], selectedCar: id });
+        return true;
+      });
+      ui = createGarageUI(root, { save, trackName: 'Площадь', onStart, onMute: () => {}, onGhosts: () => {}, initialCar, onBrowse, onBuy });
+    }
+    const cta = (): HTMLButtonElement => q<HTMLButtonElement>('.dr-cta');
+
+    it('opens on the selected car and steps through the line-up with ← →, wrapping around', () => {
+      mountCars({ ...SAVE, ownedCars: ['iskra', 'ronin'], selectedCar: 'ronin' });
+      expect(q('.dr-car__name').textContent).toBe('Ронин');
+      expect(q('.dr-car__count').textContent).toBe('Машина 3/4');
+      keydown('ArrowRight');
+      expect(q('.dr-car__name').textContent).toBe('Скарабей');
+      keydown('ArrowRight');
+      expect(q('.dr-car__name').textContent).toBe('Искра');
+      keydown('ArrowLeft');
+      expect(onBrowse.mock.calls.map(([id]) => id)).toEqual(['scarab', 'iskra', 'scarab']);
+    });
+
+    it('steps with the ‹ › buttons too', () => {
+      mountCars();
+      click(q('.dr-carnav__btn[data-step="1"]'));
+      expect(q('.dr-car__name').textContent).toBe('Квадро');
+      click(q('.dr-carnav__btn[data-step="-1"]'));
+      expect(q('.dr-car__name').textContent).toBe('Искра');
+    });
+
+    it('shows a locked car with its price, and Enter does not start a race in it', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      expect(q('.dr-car__lock').textContent).toBe('Не куплена');
+      expect(cta().classList.contains('dr-cta--buy')).toBe(true);
+      expect(norm(cta().textContent)).toContain('Купить');
+      expect(norm(cta().textContent)).toContain('300');
+      keydown('Enter');
+      expect(onStart).not.toHaveBeenCalled();
+      keydown('ArrowLeft');
+      keydown('Enter');
+      expect(onStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('disables «Купить» and tells how many coins are missing', () => {
+      mountCars({ ...SAVE, coins: 120 });
+      keydown('ArrowRight');
+      expect(cta().disabled).toBe(true);
+      expect(norm(q('.dr-cta-hint').textContent)).toContain('Не хватает');
+      expect(norm(q('.dr-cta-hint').textContent)).toContain('180 монет');
+    });
+
+    it('buys only after the confirmation; «Отмена» buys nothing', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      click(cta());
+      expect(norm(q('.dr-modal__title').textContent)).toBe('Купить «Квадро»?');
+      click(q('[data-ref="cancel"]'));
+      expect(root.querySelector('.dr-modal')).toBeNull();
+      expect(onBuy).not.toHaveBeenCalled();
+
+      click(cta());
+      click(q('[data-confirm-buy]'));
+      expect(onBuy).toHaveBeenCalledWith('quadro');
+      expect(root.querySelector('.dr-modal')).toBeNull();
+      expect(q('.dr-car__lock').textContent).toBe('');
+      expect(cta().classList.contains('dr-cta--buy')).toBe(false);
+      expect(norm(cta().textContent)).toContain('В заезд');
+    });
+
+    it('focuses «Отмена» in the buy dialog, so Enter there cancels', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      click(cta(), 0);
+      expect(document.activeElement).toBe(q('[data-ref="cancel"]'));
+    });
+
+    it('opens on `initialCar` when given (test preview)', () => {
+      mountCars(SAVE, 'scarab');
+      expect(q('.dr-car__name').textContent).toBe('Скарабей');
     });
   });
 });

@@ -1,14 +1,19 @@
-/** Minimal garage overlay: top bar, car card with stats, track card with CTA, rules/records modals. */
+/**
+ * Garage overlay: top bar, car card with the line-up switcher (‹ › / ← →), track card whose CTA races an owned
+ * car or buys a locked one after a confirmation, rules / records modals.
+ */
 import type { SaveData } from '../shared/types';
 import type { LeaderboardPort } from '../shared/leaderboard';
 import { TUNING } from '../shared/tuning';
+import { CARS, type CarId } from '../shared/cars';
 import { formatPoints, formatTime, pluralRu } from './format';
 import { mountFriends, type FriendsView } from './leaderboardView';
+import { buyDialogHtml, carCountLabel, ctaState, statsHtml, stepCar } from './garageCar';
 import { COIN_HTML, LOGO_HTML, createLayer, escapeHtml, isInteractiveTarget, isTextField, keyHtml, play, qs } from './screens';
 import { APP_VERSION } from '../shared/version';
 
 export interface GarageUI {
-  /** New save: coins pop in the wallet, records, the sound toggle and the ghost switch follow it. */
+  /** New save: coins pop in the wallet; records, the sound toggle, the ghost switch and the car card follow it. */
   update(save: SaveData): void;
   destroy(): void;
 }
@@ -17,18 +22,12 @@ export interface GarageUI {
 const GHOST_SVG =
   '<svg viewBox="0 0 24 24" width="1.25em" height="1.25em" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 20.5V11a7 7 0 0 1 14 0v9.5l-2.33-1.75-2.34 1.75L12 18.75l-2.33 1.75-2.34-1.75z"/><circle cx="9.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>';
 
-/** Display-only car card values (design spec §6), not physics parameters. */
-const CAR_STATS: readonly { label: string; value: number; color: string }[] = [
-  { label: 'Скорость', value: 76, color: 'var(--dr-coral)' },
-  { label: 'Разгон', value: 85, color: 'var(--dr-text)' },
-  { label: 'Управление', value: 77, color: 'var(--dr-gold)' },
-  { label: 'Сцепление', value: 64, color: 'var(--dr-green)' },
-];
-
 const POP: Keyframe[] = [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }];
 
-type ModalKind = 'rules' | 'records';
+type ModalKind = 'rules' | 'records' | 'buy';
 const LAP_FORMS = ['круг', 'круга', 'кругов'] as const;
+/** «не хватает 1 монеты / 2 монет / 5 монет». */
+const COIN_FORMS = ['монеты', 'монет', 'монет'] as const;
 /** Title of the open modal (one at a time), referenced by its aria-labelledby. */
 const MODAL_TITLE_ID = 'dr-modal-title';
 const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -36,17 +35,6 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tab
 /** Speaker; the waves show while sound is on, the cross while muted (styles.css keys off aria-checked). */
 const SOUND_SVG =
   '<svg viewBox="0 0 24 24" width="1.25em" height="1.25em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><g class="dr-sound__on"><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/></g><g class="dr-sound__off"><path d="m15.5 9.5 5 5m0-5-5 5"/></g></svg>';
-
-function statsHtml(): string {
-  return CAR_STATS.map(
-    (s, i) =>
-      `<li class="dr-stat" style="--c:${s.color};--v:${s.value / 100};--d:${0.25 + i * 0.08}s">
-        <span class="dr-stat__label">${s.label}</span>
-        <span class="dr-stat__val dr-num">${s.value}</span>
-        <span class="dr-stat__bar"><i></i></span>
-      </li>`,
-  ).join('');
-}
 
 /** Seconds for the Russian copy: 0.3 → "0,3", 1.5 → "1,5"; at most two decimals, so float noise never shows. */
 function decimalRu(x: number): string {
@@ -122,6 +110,12 @@ export function createGarageUI(
     onGhosts(on: boolean): void;
     /** Friends table in «Рекорды»; null / omitted: personal records only. */
     leaderboard?: LeaderboardPort | null;
+    /** The car the garage opens on (default: the save's selected car). */
+    initialCar?: CarId;
+    /** The player browsed to another car: the podium shows it (an owned one also becomes the selected car). */
+    onBrowse?(id: CarId): void;
+    /** «Купить» confirmed. True when the car was bought; the new save arrives through update() as well. */
+    onBuy?(id: CarId): boolean;
   },
 ): GarageUI {
   const laps = TUNING.race.laps;
@@ -143,18 +137,23 @@ export function createGarageUI(
     </header>
     <div class="dr-version" aria-label="Версия игры">v${escapeHtml(APP_VERSION)}</div>
     <section class="dr-panel dr-car">
-      <div class="dr-eyebrow">Ваша машина</div>
-      <h1 class="dr-h dr-car__name">Искра</h1>
-      <div class="dr-car__class">Дрифт-кар · задний привод</div>
-      <ul class="dr-stats">${statsHtml()}</ul>
+      <div class="dr-eyebrow dr-car__eyebrow"><span class="dr-car__count"></span><span class="dr-car__lock"></span></div>
+      <h1 class="dr-h dr-car__name"></h1>
+      <div class="dr-car__class"></div>
+      <p class="dr-car__tagline"></p>
+      <ul class="dr-stats"></ul>
     </section>
+    <div class="dr-carnav">
+      <button type="button" class="dr-carnav__btn" data-step="-1" aria-label="Предыдущая машина" title="Предыдущая машина (←)">‹</button>
+      <button type="button" class="dr-carnav__btn" data-step="1" aria-label="Следующая машина" title="Следующая машина (→)">›</button>
+    </div>
     <section class="dr-panel dr-track">
       <div class="dr-eyebrow">Трасса</div>
       <div class="dr-h dr-track__name">${escapeHtml(opts.trackName)} <span>· 1</span></div>
       <div class="dr-track__meta">${laps} ${pluralRu(laps, LAP_FORMS)} · дрифт на очки</div>
       <div class="dr-track__best"><span class="dr-eyebrow">Рекорд</span><b class="dr-track__score dr-num"></b></div>
-      <button type="button" class="dr-cta">В заезд<span class="dr-cta__arrows" aria-hidden="true"><i>›</i><i>›</i><i>›</i></span></button>
-      <div class="dr-cta-hint">или ${keyHtml('Enter')}</div>
+      <button type="button" class="dr-cta"><span class="dr-cta__label">В заезд</span><span class="dr-cta__arrows" aria-hidden="true"><i>›</i><i>›</i><i>›</i></span></button>
+      <div class="dr-cta-hint"></div>
     </section>`,
   );
 
@@ -165,10 +164,23 @@ export function createGarageUI(
   const soundBtn = qs<HTMLButtonElement>(layer, '.dr-sound');
   const ghostsBtn = qs<HTMLButtonElement>(layer, '.dr-ghosts');
   const navButtons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.dr-nav__item'));
+  const carCard = qs(layer, '.dr-car');
+  const carCount = qs(layer, '.dr-car__count');
+  const carLock = qs(layer, '.dr-car__lock');
+  const carName = qs(layer, '.dr-car__name');
+  const carClass = qs(layer, '.dr-car__class');
+  const carTagline = qs(layer, '.dr-car__tagline');
+  const statsList = qs(layer, '.dr-stats');
+  const ctaLabel = qs(layer, '.dr-cta__label');
+  const ctaHint = qs(layer, '.dr-cta-hint');
+  const carNavButtons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.dr-carnav__btn'));
   /** Everything behind a modal: inert while one is open, so neither Tab nor a screen reader reaches it. */
   const background = Array.from(layer.children).filter((c): c is HTMLElement => c instanceof HTMLElement);
 
   let save = opts.save;
+  /** The car on the card and the podium (owned or not). */
+  let browsed: CarId = opts.initialCar ?? save.selectedCar;
+  const isOwned = (id: CarId): boolean => save.ownedCars.includes(id);
   let muted = save.muted;
   let ghosts = save.ghosts;
   let started = false;
@@ -203,6 +215,47 @@ export function createGarageUI(
     if (modal?.kind === 'records') qs(modal.body, '[data-ref="personal"]').innerHTML = personalHtml(save);
   }
 
+  /** The browsed car's card, the CTA (race it or buy it) and the hint under it. */
+  function renderCar(): void {
+    const spec = CARS[browsed];
+    carCount.textContent = carCountLabel(browsed);
+    carLock.textContent = isOwned(browsed) ? '' : 'Не куплена';
+    carName.textContent = spec.name;
+    carClass.textContent = spec.subtitle;
+    carTagline.textContent = spec.tagline;
+    // Rebuilt only for another car, so the bars replay their grow animation then and only then.
+    if (statsList.dataset.car !== browsed) {
+      statsList.innerHTML = statsHtml(spec);
+      statsList.dataset.car = browsed;
+    }
+    const state = ctaState(browsed, save.ownedCars, save.coins);
+    cta.classList.toggle('dr-cta--buy', state.kind === 'buy');
+    cta.disabled = state.kind === 'buy' && state.short > 0;
+    if (state.kind === 'race') {
+      ctaLabel.textContent = 'В заезд';
+      ctaHint.innerHTML = `или ${keyHtml('Enter')} · ${keyHtml('←')}${keyHtml('→')} машины`;
+    } else {
+      ctaLabel.innerHTML = `Купить <span class="dr-cta__price">${COIN_HTML}${formatPoints(state.price)}</span>`;
+      ctaHint.innerHTML =
+        state.short > 0
+          ? `Не хватает ${COIN_HTML}<b class="dr-num">${formatPoints(state.short)}</b> ${pluralRu(state.short, COIN_FORMS)}`
+          : 'Машина останется в гараже навсегда';
+    }
+  }
+
+  function browse(step: number): void {
+    browsed = stepCar(browsed, step);
+    renderCar();
+    opts.onBrowse?.(browsed);
+  }
+
+  function confirmBuy(): void {
+    const bought = opts.onBuy?.(browsed) ?? false;
+    closeModal();
+    renderCar();
+    if (bought) play(carCard, POP, { duration: 420, easing: 'ease-out' });
+  }
+
   /** Drop focus from any garage control so a page-level Enter reaches the start handler. */
   function blurInside(): void {
     const active = document.activeElement;
@@ -218,6 +271,7 @@ export function createGarageUI(
     el.remove();
     for (const b of background) b.removeAttribute('inert');
     for (const b of navButtons) b.classList.remove('is-open');
+    opener.classList.remove('is-open');
     // Only keyboard users get focus back on the nav button: for a mouse user a focused nav button
     // would swallow the next Enter (re-opening the modal) instead of starting the race.
     if (refocus) opener.focus({ preventScroll: true });
@@ -227,7 +281,7 @@ export function createGarageUI(
   function openModal(kind: ModalKind, opener: HTMLElement, refocus: boolean): void {
     closeModal();
     const el = document.createElement('div');
-    el.className = 'dr-modal';
+    el.className = `dr-modal dr-modal--${kind}`;
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-labelledby', MODAL_TITLE_ID);
@@ -235,16 +289,24 @@ export function createGarageUI(
       <div class="dr-panel dr-modal__card"><button type="button" class="dr-close" aria-label="Закрыть" data-close></button><div class="dr-modal__body"></div></div>`;
     const body = qs(el, '.dr-modal__body');
     const board = kind === 'records' ? (opts.leaderboard ?? null) : null;
-    body.innerHTML = kind === 'rules' ? rulesHtml() : recordsHtml(save, board !== null);
+    body.innerHTML =
+      kind === 'rules'
+        ? rulesHtml()
+        : kind === 'records'
+          ? recordsHtml(save, board !== null)
+          : buyDialogHtml(CARS[browsed], save.coins, MODAL_TITLE_ID);
     if (board) friends = mountFriends(qs(body, '[data-ref="friends"]'), board);
     for (const b of background) b.setAttribute('inert', '');
     layer.appendChild(el);
     modal = { kind, el, body, opener, refocus };
     opener.classList.add('is-open');
     el.addEventListener('click', (e) => {
-      if (e.target instanceof Element && e.target.closest('[data-close]')) closeModal();
+      if (!(e.target instanceof Element)) return;
+      if (e.target.closest('[data-confirm-buy]')) confirmBuy();
+      else if (e.target.closest('[data-close]')) closeModal();
     });
-    qs(el, '.dr-close').focus({ preventScroll: true });
+    // The buy dialog starts on «Отмена»: Enter there must never spend coins.
+    qs(el, kind === 'buy' ? '[data-ref="cancel"]' : '.dr-close').focus({ preventScroll: true });
   }
 
   /** Tab / Shift+Tab cycle through the open modal's controls only (the inert background also hides it from assistive tech). */
@@ -259,6 +321,7 @@ export function createGarageUI(
 
   /** One-shot: a double click or two quick Enters must not start two races before destroy(). */
   function start(): void {
+    if (!isOwned(browsed)) return;
     closeModal();
     blurInside(); // also on repeats: a second click re-focuses the CTA on mousedown
     if (started) return;
@@ -276,7 +339,19 @@ export function createGarageUI(
     else closeModal();
   };
   for (const b of navButtons) b.addEventListener('click', onNav);
-  cta.addEventListener('click', start);
+  const onCta = (e: MouseEvent): void => {
+    if (isOwned(browsed)) start();
+    // detail === 0: keyboard activation; focus returns to the CTA when the dialog closes.
+    else openModal('buy', cta, e.detail === 0);
+  };
+  cta.addEventListener('click', onCta);
+  const onCarNav = (e: MouseEvent): void => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    // A pointer click must not leave focus on the arrow, or the next Enter would step again instead of racing.
+    if (e.detail !== 0) btn.blur();
+    browse(Number(btn.dataset.step));
+  };
+  for (const b of carNavButtons) b.addEventListener('click', onCarNav);
   const onSound = (e: MouseEvent): void => {
     // A pointer click must not leave focus here, or the next Enter would toggle sound instead of starting.
     if (e.detail !== 0) soundBtn.blur();
@@ -303,6 +378,9 @@ export function createGarageUI(
     } else if (e.code === 'Escape' && modal) {
       e.preventDefault();
       closeModal();
+    } else if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && !modal && !isTextField(e.target)) {
+      e.preventDefault();
+      browse(e.code === 'ArrowLeft' ? -1 : 1);
     } else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && !modal && !isInteractiveTarget(e.target)) {
       e.preventDefault();
       start();
@@ -311,12 +389,14 @@ export function createGarageUI(
   window.addEventListener('keydown', onKey);
 
   render(null);
+  renderCar();
 
   return {
     update(next: SaveData): void {
       const prevCoins = save.coins;
       save = next;
       render(prevCoins);
+      renderCar();
     },
     destroy(): void {
       window.removeEventListener('keydown', onKey);
