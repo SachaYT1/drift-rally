@@ -3,9 +3,10 @@ import type { CarState, Collider, CollisionResult, Contact } from '../shared/typ
 import { TUNING, type Tuning } from '../shared/tuning';
 import { clamp } from '../shared/math';
 import { carCapsule, withDerived } from './car';
+import { EPS, closestParamOnSegment, type Segment } from './collisionGeometry';
+import { wallSlide, type SlideHit } from './collisionSlide';
 
 type Capsule = { ax: number; az: number; bx: number; bz: number; r: number };
-type Segment = { ax: number; az: number; bx: number; bz: number };
 type WallCollider = Extract<Collider, { kind: 'wall' }>;
 
 /** One overlap: push the car by `pen` along the unit normal (nx, nz); (x, z) is the contact point. */
@@ -17,22 +18,44 @@ interface Overlap {
   z: number;
 }
 
-/** Geometric tolerance; also the minimum penetration that counts as an overlap. */
-const EPS = 1e-9;
+/** The contact kept for one collider over all passes, with its collider and deepest penetration. */
+interface Recorded extends SlideHit {
+  depth: number;
+}
 
 /**
  * Push the car capsule out of every overlapping collider and respond with restitution/friction.
  * Up to `collision.iterations` passes; each pass resolves the current overlaps deepest first.
+ * A step without a heavy hit then applies the wall slide (see wallSlide; `dt` is the physics step, s) and
+ * separates again, since the slide's pivot can swing the body into a second collider.
  */
 export function resolveCollisions(
   state: CarState,
   colliders: readonly Collider[],
   t: Tuning = TUNING,
+  dt: number = 1 / t.race.physicsHz,
 ): CollisionResult {
+  const recorded = new Map<string, Recorded>();
+  let s = separate(state, colliders, t, recorded);
+  if (recorded.size === 0) return { state: { ...state }, contacts: [], heavyHit: null };
+
+  const hits = deepestFirst(recorded);
+  if (!strongestHeavy(hits, t)) {
+    const slid = wallSlide(s, hits, colliders, t, dt);
+    if (slid !== s) s = separate(slid, colliders, t, recorded);
+  }
+  const final = deepestFirst(recorded);
+  return { state: withDerived(s, t), contacts: final.map((e) => e.contact), heavyHit: strongestHeavy(final, t) };
+}
+
+function deepestFirst(recorded: ReadonlyMap<string, Recorded>): Recorded[] {
+  return [...recorded.values()].sort((p, q) => q.depth - p.depth);
+}
+
+/** Up to collision.iterations push-out passes, deepest overlap first; contacts go to `recorded`. */
+function separate(state: CarState, colliders: readonly Collider[], t: Tuning, recorded: Map<string, Recorded>): CarState {
   let s = state;
   let cap = carCapsule(s, t);
-  const recorded = new Map<string, { contact: Contact; depth: number }>();
-
   for (let pass = 0; pass < t.collision.iterations; pass++) {
     const found: { collider: Collider; pen: number }[] = [];
     for (const collider of colliders) {
@@ -49,18 +72,19 @@ export function resolveCollisions(
       const r = respond(s, o, collider.id, t);
       s = r.state;
       cap = carCapsule(s, t);
-      record(recorded, r.contact, o.pen);
+      record(recorded, r.contact, o.pen, collider);
     }
   }
+  return s;
+}
 
-  if (recorded.size === 0) return { state: { ...state }, contacts: [], heavyHit: null };
-
-  const contacts = [...recorded.values()].sort((p, q) => q.depth - p.depth).map((e) => e.contact);
+/** The contact with the highest impact speed at or above collision.heavyImpact (deepest on a tie), else null. */
+function strongestHeavy(hits: readonly Recorded[], t: Tuning): Contact | null {
   let heavyHit: Contact | null = null;
-  for (const c of contacts) {
+  for (const { contact: c } of hits) {
     if (c.impactSpeed >= t.collision.heavyImpact && (!heavyHit || c.impactSpeed > heavyHit.impactSpeed)) heavyHit = c;
   }
-  return { state: withDerived(s, t), contacts, heavyHit };
+  return heavyHit;
 }
 
 /** Overlap test between a capsule and a circle (used for pickups). Touching is not an overlap. */
@@ -119,15 +143,16 @@ function respond(s: CarState, o: Overlap, colliderId: string, t: Tuning): { stat
 }
 
 /** Keep one contact per collider id: the one with the highest impact speed; track the max depth. */
-function record(recorded: Map<string, { contact: Contact; depth: number }>, contact: Contact, pen: number): void {
+function record(recorded: Map<string, Recorded>, contact: Contact, pen: number, collider: Collider): void {
   const prev = recorded.get(contact.colliderId);
   if (!prev) {
-    recorded.set(contact.colliderId, { contact, depth: pen });
+    recorded.set(contact.colliderId, { contact, depth: pen, collider });
     return;
   }
   recorded.set(contact.colliderId, {
     contact: contact.impactSpeed > prev.contact.impactSpeed ? contact : prev.contact,
     depth: Math.max(prev.depth, pen),
+    collider,
   });
 }
 
@@ -232,15 +257,6 @@ function clipLinear(v0: number, v1: number, lo: number, hi: number): [number, nu
 // ---------------------------------------------------------------------------
 // Closest points
 // ---------------------------------------------------------------------------
-
-/** Parameter in [0, 1] of the point on segment ab closest to (px, pz). */
-function closestParamOnSegment(seg: Segment, px: number, pz: number): number {
-  const dx = seg.bx - seg.ax;
-  const dz = seg.bz - seg.az;
-  const len2 = dx * dx + dz * dz;
-  if (len2 <= EPS) return 0;
-  return clamp(((px - seg.ax) * dx + (pz - seg.az) * dz) / len2, 0, 1);
-}
 
 /**
  * Parameters (s on p, t on q) of the closest points between two segments (Ericson,

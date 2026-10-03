@@ -60,6 +60,16 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('button, a, input, textarea, select, [role="button"]') !== null;
 }
 
+/** True when typing goes into this element: letter shortcuts (M) must leave the keystroke to the field. */
+export function isTextField(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('input, textarea, select, [contenteditable]') !== null;
+}
+
+/** Escape text for innerHTML markup (player nicks, track names). */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------

@@ -117,11 +117,12 @@ const HUD_HTML = `
   <div class="dr-countdown" aria-live="assertive"><span data-ref="count"></span></div>
   <div class="dr-wrong" role="alert">${UTURN_SVG}Не туда! Разворачивайтесь</div>
   <div class="dr-toast"><div class="dr-toast__title" data-ref="toastTitle"></div><div class="dr-toast__sub" data-ref="toastSub"></div></div>
-  <div class="dr-hint">
+  <div class="dr-hint" style="display:grid;grid-template-columns:repeat(4,auto);gap:0.5em 1.3em">
     <span>${keyHtml('W')}${keyHtml('A')}${keyHtml('S')}${keyHtml('D')} газ и руль</span>
     <span>${keyHtml('Пробел')} дрифт</span>
     <span>${keyHtml('R')} на трассу</span>
     <span>${keyHtml('Esc')} пауза</span>
+    <span class="dr-hint__exits" style="grid-column:1/-1;justify-content:center"><b>В заносе:</b> ${keyHtml('S')} — выход, контрруль или сброс газа — выровняться</span>
   </div>`;
 
 export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {

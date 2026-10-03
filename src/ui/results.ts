@@ -1,6 +1,8 @@
-/** Results screen: score (count-up), record badge, stats, laps, coins, retry / garage / share. */
+/** Results screen: score (count-up), record badge, stats, laps, coins, friends table place, retry / garage / share. */
 import type { RaceResult } from '../shared/types';
+import type { LeaderboardPort, Placement } from '../shared/leaderboard';
 import { formatPoints, formatTime, pluralRu } from './format';
+import { createNickForm, type NickForm } from './nickForm';
 import { buildShareText, copyText } from './share';
 import { COIN_HTML, createLayer, isInteractiveTarget, keyHtml, qs } from './screens';
 
@@ -9,10 +11,25 @@ const COUNT_UP_MS = 1100;
 const ARM_MS = 700;
 const COPIED_MS = 2200;
 
+/** The friends table on the results screen: what this finish did to it, and the port to join it. */
+export interface ResultsLeaderboard {
+  placement: Promise<Placement>;
+  port: LeaderboardPort;
+}
+
+function placeHtml(place: number, total: number): string {
+  return `<p class="dr-lb__line">Место в таблице: <b class="dr-num">#${place}</b> из <b class="dr-num">${total}</b></p>`;
+}
+
+const LB_LINES: Record<Exclude<Placement['kind'], 'placed' | 'noNick'>, string> = {
+  offline: 'Таблица друзей недоступна — результат уйдёт при следующем запуске',
+  rejected: 'Таблица друзей не приняла этот результат',
+};
+
 export function showResults(
   root: HTMLElement,
   r: RaceResult,
-  ctx: { newBest: boolean; bestScore: number; shareUrl: string },
+  ctx: { newBest: boolean; bestScore: number; shareUrl: string; leaderboard?: ResultsLeaderboard | null },
   h: { onRetry(): void; onGarage(): void },
 ): { destroy(): void } {
   const points = Math.max(0, Math.round(r.totalPoints));
@@ -46,6 +63,7 @@ export function showResults(
         <div class="dr-earn__total">${COIN_HTML}<span class="dr-num">+${formatPoints(r.coinsEarned)}</span></div>
         <div class="dr-earn__parts"><b class="dr-num">${r.coinsPicked}</b> собрано на трассе<br><b class="dr-num">${r.coinsFromDrift}</b> за дрифт</div>
       </div>
+      ${ctx.leaderboard ? '<div class="dr-lb" data-ref="lb" aria-live="polite"><p class="dr-lb__line dr-lb__line--dim">Место в таблице: отправляем…</p></div>' : ''}
       <div class="dr-results__actions">
         <button type="button" class="dr-btn dr-btn--primary" data-act="retry">Ещё раз</button>
         <button type="button" class="dr-btn" data-act="garage">В гараж</button>
@@ -66,6 +84,7 @@ export function showResults(
   let raf = 0;
   let copiedTimer = 0;
   let done = false;
+  let nickForm: NickForm | null = null;
   const armedAt = performance.now() + ARM_MS;
 
   // Count-up: ease-out from 0 to the final score; the static value is the fallback.
@@ -78,6 +97,40 @@ export function showResults(
   };
   if (points > 0 && typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(tick);
   else scoreEl.textContent = formatPoints(points);
+
+  /** The friends-table slot once this finish's placement is known. */
+  function showPlacement(lbEl: HTMLElement, lb: ResultsLeaderboard, p: Placement): void {
+    if (p.kind === 'placed') {
+      lbEl.innerHTML = placeHtml(p.place, p.total);
+    } else if (p.kind === 'noNick') {
+      lbEl.innerHTML = '<p class="dr-lb__line"><b>Попади в таблицу друзей:</b> введи ник</p>';
+      nickForm = createNickForm({
+        port: lb.port,
+        submitLabel: 'В таблицу',
+        onDone: (st) => {
+          nickForm?.destroy();
+          nickForm = null;
+          lbEl.innerHTML = placeHtml(st.place, st.total);
+        },
+      });
+      lbEl.appendChild(nickForm.el);
+    } else {
+      lbEl.innerHTML = `<p class="dr-lb__line dr-lb__line--dim">${LB_LINES[p.kind]}</p>`;
+    }
+  }
+
+  const lb = ctx.leaderboard;
+  if (lb) {
+    const lbEl = qs(layer, '[data-ref="lb"]');
+    void lb.placement.then(
+      (p) => {
+        if (!done) showPlacement(lbEl, lb, p);
+      },
+      () => {
+        if (!done) showPlacement(lbEl, lb, { kind: 'offline' });
+      },
+    );
+  }
 
   async function share(): Promise<void> {
     const text = buildShareText(points, ctx.shareUrl);
@@ -136,6 +189,8 @@ export function showResults(
     done = true;
     if (raf) cancelAnimationFrame(raf);
     window.clearTimeout(copiedTimer);
+    nickForm?.destroy();
+    nickForm = null;
     window.removeEventListener('keydown', onKey);
     layer.removeEventListener('click', onClick);
     layer.remove();

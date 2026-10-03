@@ -1,6 +1,6 @@
 /**
- * Drift exits keep the direction of travel (design spec §2.3, control scheme A): on every exit (lift W and
- * Space, brake, catch) the body swings to the velocity heading instead of the velocity snapping toward the
+ * Drift exits keep the direction of travel (design spec §2.3, control scheme A): on every exit (lift W, brake,
+ * catch, the handbrake's low-speed exit) the body swings to the velocity heading instead of the velocity snapping toward the
  * nose. Before this, a lift from a steady 35 deg drift turned the velocity ~40 deg toward the inside of the
  * corner within 0.6 s (the "inward dart"). Also: drift speed balance (no "drift highway" on straights).
  */

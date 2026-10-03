@@ -28,6 +28,11 @@ export function createCarState(x: number, z: number, heading: number): CarState 
     flickArm: 0,
     catchTimer: 0,
     exitAlign: 0,
+    pathCurv: 0,
+    entryCurv: 0,
+    entryAt: 0,
+    lineOffset: 0,
+    intoLatch: 0,
     // At rest: every derived field is 0 for any tuning, so the global TUNING is fine here.
     ...derive(heading, 0, 0, TUNING),
     rpm: 0,
@@ -56,7 +61,7 @@ export function stepCar(
   let driftTime = 0;
   const exit = m.mode === 'grip' && m.exitAlign > 0 ? integrateExit(state, m.gripBlend, ctx) : null;
   if (m.mode === 'drift') {
-    motion = integrateDrift(ctx, m.driftDir);
+    motion = integrateDrift(ctx, m);
     driftTime = m.driftTime + dt;
   } else if (exit) {
     motion = exit;
@@ -91,6 +96,11 @@ export function stepCar(
     flickArm: m.flickArm,
     catchTimer: m.catchTimer,
     exitAlign: m.exitAlign,
+    pathCurv: pathCurvature(ctx, motion),
+    entryCurv: m.entryCurv,
+    entryAt: m.entryAt,
+    lineOffset: m.lineOffset,
+    intoLatch: m.intoLatch,
     ...derived,
     rpm: clamp(rpm, 0, 1),
   };
@@ -162,11 +172,20 @@ function integrateGrip(
   return { vx: vf * fx + vl * fz, vz: vf * fz - vl * fx, yawRate, gripBlend, reverseHold };
 }
 
+/**
+ * Signed curvature of this step's path, 1/m (+ = left): the velocity-heading change per metre travelled. 0
+ * below car.slipMinSpeed, where the velocity direction is noise. A drift kick starts its path from it.
+ */
+function pathCurvature(c: StepContext, motion: Motion): number {
+  if (c.speed < Math.max(c.t.car.slipMinSpeed, 1e-6)) return 0;
+  return wrapAngle(Math.atan2(motion.vx, motion.vz) - c.phi) / (c.speed * c.dt);
+}
+
 function isFiniteState(s: CarState): boolean {
   return Object.values(s).every((v) => typeof v !== 'number' || Number.isFinite(v));
 }
 
 /** The previous state with zero velocity (defensive fallback for non-finite results). */
 function stopped(prev: CarState, t: Tuning): CarState {
-  return { ...prev, vx: 0, vz: 0, yawRate: 0, ...derive(prev.heading, 0, 0, t) };
+  return { ...prev, vx: 0, vz: 0, yawRate: 0, pathCurv: 0, ...derive(prev.heading, 0, 0, t) };
 }

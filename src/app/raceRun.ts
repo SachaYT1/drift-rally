@@ -9,12 +9,14 @@
  * and syncs the visuals after every fixed step, so effects stay continuous and deterministic.
  */
 import type { InputFrame, RaceResult } from '../shared/types';
+import type { Placement } from '../shared/leaderboard';
 import { TUNING } from '../shared/tuning';
 import { createSession, type Session, type SessionState } from '../game/session';
 import { createFixedLoop } from '../core/loop';
 import { createHud } from '../ui/hud';
 import { createPauseMenu } from '../ui/pause';
 import { showResults } from '../ui/results';
+import { isTextField } from '../ui/screens';
 import type { App } from './context';
 import { interpolateCar } from './interpolate';
 import { hintVisible, hudViewOf, parkedCar } from './raceView';
@@ -75,6 +77,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   let hintShown: boolean | null = null;
   let resultsTimer = 0;
   let outcome: { result: RaceResult; save: SaveOutcome } | null = null;
+  /** This finish on the friends table (null: no leaderboard, or not finished). */
+  let placement: Promise<Placement> | null = null;
   let resultsUi: { destroy(): void } | null = null;
   const renderCar = { ...session.state().car };
   const parked = { ...renderCar };
@@ -173,6 +177,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     // Saved once, at the finish; quitting earlier forfeits (design spec §2.5). Applied to the save as stored
     // now: another tab may have raced since this one loaded, and its coins and records must survive.
     outcome = { result, save: recordRaceResult(app, result) };
+    // Sent while the «Финиш!» toast plays; the results screen shows the place when it arrives.
+    placement = app.leaderboard?.recordFinish() ?? null;
     audio.setEngineActive(false);
     hudTick(session.state(), 0, true);
     resultsTimer = window.setTimeout(showResultsNow, RESULTS_DELAY_MS);
@@ -190,7 +196,12 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     resultsUi = showResults(
       ui,
       outcome.result,
-      { newBest: outcome.save.newBest, bestScore: app.save.bestScore, shareUrl: location.href.split(/[?#]/)[0] },
+      {
+        newBest: outcome.save.newBest,
+        bestScore: app.save.bestScore,
+        shareUrl: location.href.split(/[?#]/)[0],
+        leaderboard: app.leaderboard && placement ? { placement, port: app.leaderboard } : null,
+      },
       { onRetry: () => hooks.onRestart(), onGarage: () => hooks.onGarage() },
     );
     hooks.onResults();
@@ -234,7 +245,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
       if (finished) return;
       if (paused) resume();
       else pause('player');
-    } else if (e.code === 'KeyM') {
+    } else if (e.code === 'KeyM' && !isTextField(e.target)) {
       app.setMuted(!app.save.muted);
       pauseMenu.sync({ muted: app.save.muted });
     }

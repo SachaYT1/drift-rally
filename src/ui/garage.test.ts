@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SaveData } from '../shared/types';
+import { TUNING } from '../shared/tuning';
 import { createGarageUI, type GarageUI } from './garage';
 import { enterGarage } from '../app/garageScreen';
 import type { App } from '../app/context';
@@ -43,16 +44,29 @@ describe('garage UI (jsdom)', () => {
     return q('.dr-modal');
   };
 
+  it('shows the game version from package.json in the corner', async () => {
+    const { readFileSync } = await import('node:fs');
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    mount();
+    expect(q('.dr-version').textContent).toBe(`v${pkg.version}`);
+  });
+
   describe('rules modal', () => {
+    const driftNotes = (modal: HTMLElement): string[] =>
+      [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
+    /** The catch counts from the wheel reaching full lock (de4fbc7), so the copy quotes no time. */
+    const CATCH_NOTE = 'Полный контрруль — машина выпрямится и поймает занос';
+
     it('explains the drift controls of scheme A (design spec §2.3) and what burns the chain', () => {
       mount();
       const modal = openRules();
-      const drift = [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
-      expect(drift).toEqual([
+      expect(driftNotes(modal)).toEqual([
         'В заносе',
         'W держит занос, отпустите газ — выход',
+        // Space no longer sustains a drift (handbrake rework, spec §2.3): taps only, holding it bleeds speed.
+        'Пробел — войти в занос или подкрутить коротким нажатием; долго держать — машина теряет скорость',
         'AD внутрь — круче, наружу — прямее',
-        'Полный контрруль ~0,3 с — поймать занос и выровняться',
+        CATCH_NOTE,
         'S тормоз и выход из заноса',
         'Пробел + обратный руль — перекладка',
       ]);
@@ -60,6 +74,19 @@ describe('garage UI (jsdom)', () => {
       expect(text).toContain('Сильный удар или возврат на трассу (R) сжигают цепочку');
       // The arc control lives in the drift list now, not repeated in the scoring rules.
       expect(text).not.toContain('Руль внутрь');
+    });
+
+    it.each([0.3, 0.45, 1])('quotes no catch time (TUNING.drift.catchTime = %s): it counts from the wheel at full lock', (seconds) => {
+      const saved = TUNING.drift.catchTime;
+      TUNING.drift.catchTime = seconds;
+      try {
+        mount();
+        const notes = driftNotes(openRules());
+        expect(notes).toContain(CATCH_NOTE);
+        expect(notes.join(' ')).not.toMatch(/\d/);
+      } finally {
+        TUNING.drift.catchTime = saved;
+      }
     });
 
     it('is labelled by its title', () => {

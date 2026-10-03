@@ -124,4 +124,31 @@ describe('HUD (jsdom)', () => {
       expect(animsOn(pen).length).toBe(0);
     });
   });
+
+  describe('start hint', () => {
+    const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+    it('names the race keys, then the drift exits of scheme A on a row of their own (design spec §2.3)', () => {
+      const items = [...q('.dr-hint').children];
+      expect(items.map(text)).toEqual([
+        'WASD газ и руль',
+        'Пробел дрифт',
+        'R на трассу',
+        'Esc пауза',
+        'В заносе: S — выход, контрруль или сброс газа — выровняться',
+      ]);
+      const exits = items.at(-1)!;
+      expect(exits.classList.contains('dr-hint__exits')).toBe(true);
+      expect([...exits.querySelectorAll('.dr-key')].map(text)).toEqual(['S']);
+    });
+
+    it('shows and hides on demand', () => {
+      const hint = q('.dr-hint');
+      expect(hint.classList.contains('is-on')).toBe(false);
+      hud.showHint(true);
+      expect(hint.classList.contains('is-on')).toBe(true);
+      hud.showHint(false);
+      expect(hint.classList.contains('is-on')).toBe(false);
+    });
+  });
 });
