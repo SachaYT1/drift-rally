@@ -2,10 +2,11 @@
  * In-race HUD. DOM is written only when a displayed (rounded) value changes; all animations
  * are transform/opacity (CSS or Web Animations); no backdrop-filter. See design spec §6.
  */
-import type { GameEvent } from '../shared/types';
+import type { GameEvent, StandingRow } from '../shared/types';
 import { TUNING } from '../shared/tuning';
 import { formatKmh, formatLap, formatPoints, formatTime, MINUS } from './format';
 import { COIN_HTML, createLayer, fadeOut, keyHtml, play, playing, qs } from './screens';
+import { createStandings } from './standings';
 
 export interface HudView {
   lap: number;
@@ -19,6 +20,8 @@ export interface HudView {
   chainPhase: 'idle' | 'active' | 'grace';
   totalPoints: number;
   wrongWay: boolean;
+  /** Player vs ghost bots, best first; null / absent: no bots in this race. */
+  standings?: readonly StandingRow[] | null;
 }
 
 export interface Hud {
@@ -155,6 +158,8 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
     toastSub: ref('toastSub'),
     hint: qs(layer, '.dr-hint'),
   };
+  // Under the coin counter (styles.css), written only when a row changes.
+  const standings = createStandings(layer);
 
   // Last displayed values (integer keys); -1 / '' force the first write.
   const shown = {
@@ -300,6 +305,7 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
       el.speedBar.style.transform = `scaleX(${f.toFixed(3)})`;
     }
     setWrong(v.wrongWay);
+    standings.update(v.standings ?? null);
   }
 
   function onEvent(e: GameEvent): void {

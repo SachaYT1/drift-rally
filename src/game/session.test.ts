@@ -11,7 +11,7 @@ import { DT, FULL_THROTTLE, autopilotFor, runFor } from './testSession';
 
 const track = buildTrack(PLAZA);
 
-/** The app's drift-aware autopilot (src/app/autopilot.ts) driving the plaza session. */
+/** The drift-aware autopilot (src/game/autopilot.ts) driving the plaza session. */
 const autopilot = autopilotFor(track);
 
 /**

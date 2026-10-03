@@ -141,6 +141,11 @@ test('garage -> race -> autopilot drive -> results', async ({ page }, info) => {
     info.annotations.push({ type: 'drift', description: JSON.stringify(run) });
     expect(run.driftChunks, 'the autopilot drifted').toBeGreaterThan(0);
     expect(run.state.points, 'banked drift points').toBeGreaterThan(0);
+    // Ghost bots are on by default: three bots race along, ranked with the player in the HUD.
+    expect(run.state.bots.map((b) => b.id)).toEqual(['rookie', 'pro', 'master']);
+    expect(run.state.bots.some((b) => b.points > 0), 'the bots score too').toBe(true);
+    await expect(page.locator('.dr-standings')).toBeVisible();
+    await expect(page.locator('.dr-standings li')).toHaveCount(4);
     await frames(page);
     await shot(page, info, '3-drift');
   });
@@ -159,9 +164,43 @@ test('garage -> race -> autopilot drive -> results', async ({ page }, info) => {
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('driftRally.save.v1') ?? 'null'));
     expect(saved).toMatchObject({ version: 1, bestScore: Math.round(end.points) });
     info.annotations.push({ type: 'result', description: JSON.stringify({ state: end, save: saved }) });
+    // Every bot was raced to its finish for the «you vs bots» block.
+    expect(end.bots.every((b) => b.finished && b.points > 0)).toBe(true);
+    const versus = results.locator('.dr-versus');
+    await expect(versus).toContainText('Ты против ботов');
+    await expect(versus).toContainText(/Место: \d из 4/);
+    await expect(versus.locator('li')).toHaveCount(4);
+    await expect(versus.locator('li.is-player')).toContainText('Ты');
     await frames(page, 90); // the score count-up runs for about 1.1 s
     await shot(page, info, '4-results');
   });
 
+  expect(problems, 'console errors / warnings / page errors').toEqual([]);
+});
+
+test('the garage switch turns the ghost bots off for the next race', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('console', (m) => {
+    const type = m.type();
+    if ((type === 'error' || type === 'warning') && !ALLOWED_CONSOLE.some((re) => re.test(m.text()))) problems.push(`[console.${type}] ${m.text()}`);
+  });
+  page.on('pageerror', (e) => problems.push(`[pageerror] ${e.message}`));
+  await page.goto('./?test');
+  const ghosts = page.locator('.dr-ghosts');
+  await expect(ghosts).toHaveAttribute('aria-checked', 'true', { timeout: 120_000 });
+  await ghosts.click();
+  await expect(ghosts).toHaveAttribute('aria-checked', 'false');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('driftRally.save.v1') ?? 'null'));
+  expect(saved).toMatchObject({ ghosts: false });
+
+  await page.evaluate(() => window.__game!.startRace());
+  await page.evaluate((n) => window.__game!.step(n), COUNTDOWN_STEPS);
+  await page.evaluate((n) => window.__game!.autopilot(n), OPENING_STEPS);
+  expect((await gameState(page)).bots).toEqual([]);
+  await expect(page.locator('.dr-standings')).toBeHidden();
+
+  await page.evaluate(() => window.__game!.finish());
+  await expect(page.locator('.dr-results')).toBeVisible();
+  await expect(page.locator('.dr-versus')).toHaveCount(0);
   expect(problems, 'console errors / warnings / page errors').toEqual([]);
 });

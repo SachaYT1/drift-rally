@@ -11,6 +11,7 @@ export const DEFAULT_SAVE: Readonly<SaveData> = Object.freeze({
   bestLapMs: null,
   quality: null,
   muted: false,
+  ghosts: true,
 });
 
 /**
@@ -67,6 +68,7 @@ export function writeSave(data: SaveData, storage?: Storage | null): boolean {
     bestLapMs: data.bestLapMs,
     quality: data.quality,
     muted: data.muted,
+    ghosts: data.ghosts,
   };
   try {
     store.setItem(SAVE_KEY, JSON.stringify(record));
@@ -112,6 +114,7 @@ function sanitize(parsed: unknown): SaveData {
     bestLapMs: bestLapMs ?? DEFAULT_SAVE.bestLapMs,
     quality: isQualityLevel(r.quality) ? r.quality : DEFAULT_SAVE.quality,
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SAVE.muted,
+    ghosts: typeof r.ghosts === 'boolean' ? r.ghosts : DEFAULT_SAVE.ghosts,
   };
 }
 

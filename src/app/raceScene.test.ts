@@ -58,3 +58,27 @@ describe('race scene bombs', () => {
     expect(shake).toHaveBeenCalledWith(TUNING.camera.shakePerImpact * TUNING.bomb.shakeImpact);
   });
 });
+
+describe('race scene ghosts', () => {
+  const ghostView = (x: number, z: number) => ({ car: createCarState(x, z, 0), points: 10, opacity: 0.45, visible: true, snap: false });
+
+  it('draws the ghosts it gets, hides them without ghosts, on reset and on hideGhosts()', () => {
+    const race = createRaceScene(fakeRenderer(), track, {} as AssetLibrary, 'medium', new THREE.Texture());
+    const layer = race.scene.getObjectByName('ghosts');
+    expect(layer?.children).toHaveLength(3);
+    const shown = (): boolean[] => layer!.children.map((g) => g.visible);
+    const car = createCarState(0, 0, 0);
+    const base = { car, surface: 'road' as const, pickups: createPickups(), simTime: 0, snap: false };
+    expect(shown()).toEqual([false, false, false]);
+    race.sync({ ...base, ghosts: [ghostView(0, 40), ghostView(0, 60), ghostView(0, 80)] }, 1 / 60);
+    expect(shown()).toEqual([true, true, true]);
+    race.sync({ ...base, ghosts: null }, 1 / 60);
+    expect(shown()).toEqual([false, false, false]);
+    race.sync({ ...base, ghosts: [ghostView(0, 40), ghostView(0, 60), ghostView(0, 80)] }, 1 / 60);
+    race.hideGhosts();
+    expect(shown()).toEqual([false, false, false]);
+    race.sync({ ...base, ghosts: [ghostView(0, 40), ghostView(0, 60), ghostView(0, 80)] }, 1 / 60);
+    race.reset();
+    expect(shown()).toEqual([false, false, false]);
+  });
+});

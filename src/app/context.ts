@@ -56,13 +56,13 @@ export interface App {
   readonly leaderboard: Leaderboard | null;
   /**
    * Progress (coins, records) as stored, kept current across tabs by the 'storage' event; settings (quality,
-   * muted) are this tab's live state.
+   * muted, ghosts) are this tab's live state.
    */
   readonly save: SaveData;
   /**
    * Read-modify-write on the save as stored NOW (another tab may have written since this one loaded): `change`
    * gets the stored save (this tab's copy when storage is unreachable); the result is persisted and adopted,
-   * except its settings: change those with setQuality / setMuted. Storage failures are ignored.
+   * except its settings: change those with setQuality / setMuted / setGhosts. Storage failures are ignored.
    */
   updateSave(change: (current: SaveData) => SaveData): SaveData;
   /** Called after app.save's progress changed (this tab's writes and other tabs'); returns the unsubscribe. */
@@ -72,6 +72,8 @@ export interface App {
   setQuality(q: QualityLevel): void;
   /** Mute / unmute and persist it. */
   setMuted(m: boolean): void;
+  /** Race the ghost bots from the next race on, and persist it. */
+  setGhosts(on: boolean): void;
   screen: ScreenName;
   /** Re-render the active view once (resize while paused or behind an overlay). */
   redraw: (() => void) | null;
@@ -174,12 +176,12 @@ export function createApp(d: AppDeps): App {
   /** Adopt a stored save as app.save, keeping this tab's live settings; tell the listeners if progress moved. */
   function adopt(stored: SaveData): void {
     const prev = save;
-    save = { ...stored, quality: prev.quality, muted: prev.muted };
+    save = { ...stored, quality: prev.quality, muted: prev.muted, ghosts: prev.ghosts };
     if (!sameProgress(prev, save)) for (const cb of [...saveListeners]) cb(save);
   }
 
   /** Write one setting into the stored save (nothing else of it) and into this tab's settings. */
-  function patchSetting(patch: Partial<Pick<SaveData, 'quality' | 'muted'>>): void {
+  function patchSetting(patch: Partial<Pick<SaveData, 'quality' | 'muted' | 'ghosts'>>): void {
     save = { ...save, ...patch };
     app.updateSave((current) => ({ ...current, ...patch }));
   }
@@ -241,6 +243,9 @@ export function createApp(d: AppDeps): App {
     setMuted(m) {
       d.audio.setMuted(m);
       if (m !== save.muted) patchSetting({ muted: m });
+    },
+    setGhosts(on) {
+      if (on !== save.ghosts) patchSetting({ ghosts: on });
     },
     screen: 'loading',
     redraw: null,

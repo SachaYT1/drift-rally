@@ -1,10 +1,11 @@
 /** Results screen: score (count-up), record badge, stats, laps, coins, friends table place, retry / garage / share. */
-import type { RaceResult } from '../shared/types';
+import type { RaceResult, StandingRow } from '../shared/types';
 import type { LeaderboardPort, Placement } from '../shared/leaderboard';
 import { formatPoints, formatTime, pluralRu } from './format';
 import { createNickForm, type NickForm } from './nickForm';
 import { buildShareText, copyText } from './share';
 import { COIN_HTML, createLayer, isInteractiveTarget, keyHtml, qs } from './screens';
+import { standingsListHtml } from './standings';
 
 const COUNT_UP_MS = 1100;
 /** Keyboard shortcuts arm after this delay so a key still held from the race cannot trigger them. */
@@ -21,6 +22,15 @@ function placeHtml(place: number, total: number): string {
   return `<p class="dr-lb__line">Место в таблице: <b class="dr-num">#${place}</b> из <b class="dr-num">${total}</b></p>`;
 }
 
+/** «Ты против ботов»: the player's place among the final standings and the rows. */
+function versusHtml(rows: readonly StandingRow[]): string {
+  const place = rows.findIndex((r) => r.id === 'player') + 1;
+  return `<div class="dr-versus">
+      <div class="dr-versus__head"><span class="dr-eyebrow">Ты против ботов</span><span class="dr-versus__place">Место: <b class="dr-num">${place}</b> из <b class="dr-num">${rows.length}</b></span></div>
+      <ol class="dr-standings__list dr-versus__list">${standingsListHtml(rows)}</ol>
+    </div>`;
+}
+
 const LB_LINES: Record<Exclude<Placement['kind'], 'placed' | 'noNick'>, string> = {
   offline: 'Таблица друзей недоступна — результат уйдёт при следующем запуске',
   rejected: 'Таблица друзей не приняла этот результат',
@@ -29,7 +39,14 @@ const LB_LINES: Record<Exclude<Placement['kind'], 'placed' | 'noNick'>, string> 
 export function showResults(
   root: HTMLElement,
   r: RaceResult,
-  ctx: { newBest: boolean; bestScore: number; shareUrl: string; leaderboard?: ResultsLeaderboard | null },
+  ctx: {
+    newBest: boolean;
+    bestScore: number;
+    shareUrl: string;
+    leaderboard?: ResultsLeaderboard | null;
+    /** Final standings against the ghost bots; null / absent: the race had none. */
+    versus?: readonly StandingRow[] | null;
+  },
   h: { onRetry(): void; onGarage(): void },
 ): { destroy(): void } {
   const points = Math.max(0, Math.round(r.totalPoints));
@@ -59,6 +76,7 @@ export function showResults(
         <div class="dr-tile"><span class="dr-eyebrow">Лучший круг</span><b class="dr-num">${formatTime(r.bestLap)}</b></div>
       </div>
       <div class="dr-laps">${lapsHtml}</div>
+      ${ctx.versus ? versusHtml(ctx.versus) : ''}
       <div class="dr-earn">
         <div class="dr-earn__total">${COIN_HTML}<span class="dr-num">+${formatPoints(r.coinsEarned)}</span></div>
         <div class="dr-earn__parts"><b class="dr-num">${r.coinsPicked}</b> собрано на трассе<br><b class="dr-num">${r.coinsFromDrift}</b> за дрифт</div>
