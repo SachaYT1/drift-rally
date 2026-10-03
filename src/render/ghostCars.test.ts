@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import {
   GHOST_FADE_FAR,
   GHOST_FADE_NEAR,
-  GHOST_NEAR_OPACITY,
   GHOST_OPACITY,
   LABEL_MAX_DISTANCE,
   createGhostLayer,
@@ -33,11 +32,11 @@ function view(x: number, z: number, opacity = GHOST_OPACITY, visible = true): Gh
 }
 
 describe('ghostOpacity', () => {
-  it('is the ghost opacity far away and the near opacity close to the player', () => {
+  it('is the ghost opacity far away and invisible where it overlaps the player', () => {
     expect(ghostOpacity(100, 1)).toBeCloseTo(GHOST_OPACITY);
     expect(ghostOpacity(GHOST_FADE_FAR, 1)).toBeCloseTo(GHOST_OPACITY);
-    expect(ghostOpacity(0, 1)).toBeCloseTo(GHOST_NEAR_OPACITY);
-    expect(ghostOpacity(GHOST_FADE_NEAR, 1)).toBeCloseTo(GHOST_NEAR_OPACITY);
+    expect(ghostOpacity(0, 1)).toBe(0);
+    expect(ghostOpacity(GHOST_FADE_NEAR, 1)).toBe(0);
   });
 
   it('rises monotonically between the near and far distances', () => {

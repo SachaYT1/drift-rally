@@ -31,8 +31,10 @@ multiplier, penalties), because each bot runs its own game session.
 - All bots start from the player's spawn pose, overlapping the player's car like ghosts in TrackMania, and
   spread out after GO. Spawn logic is unchanged.
 - A ghost is a translucent «Искра» in the bot's colour, opacity 0.45. No shadow, smoke, skid marks or sound.
-- Proximity fade: a ghost closer than ~8 m to the player's car fades to ~0.1 opacity, so it never blocks the
-  view or confuses the start.
+- Proximity fade: a ghost overlapping the player's car (closer than 4 m, e.g. on the start grid) is not drawn,
+  and it fades in up to full ghost opacity at 14 m, so it never tints the player's car, piles labels on it or
+  blocks the view. (Changed from "~0.1 within 8 m" after the first visual check: a ghost exactly on the player's
+  car tinted it.)
 - Above each ghost a label: bot name in its colour and its current points, e.g. «Профи · 12 400».
 - HUD: a standings block under the coin counter (top right): 4 rows sorted by current points (place, colour dot,
   name, points). The player's row reads «Ты» and is highlighted; a finished bot shows a ✓.
@@ -114,7 +116,7 @@ report the measured score and options to the user instead of silently lowering t
   `depthFunc: LessEqualDepth`) so only the nearest surface is blended. Both passes are transparent objects with
   a `renderOrder` above the default, so they draw after the opaque world (no holes) and the depth pass precedes
   the colour pass.
-- `ghostOpacity(distanceToPlayer, fade)`: pure, unit-tested; 0.45 far away, easing to 0.1 below 8 m;
+- `ghostOpacity(distanceToPlayer, fade)`: pure, unit-tested; 0 up to 4 m, smoothstep to 0.45 at 14 m;
   `fade` (1 → 0 over 0.5 s) for finished bots and the player's finish.
 - Label: a `Sprite` with a `CanvasTexture` (name in the bot colour + points), `sizeAttenuation: false`, redrawn
   only when the rounded points change and at most 4 times per second; hidden beyond ~250 m.

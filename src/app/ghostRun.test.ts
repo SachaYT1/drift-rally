@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GHOST_FADE_TIME, createGhostRun } from './ghostRun';
 import { BOTS } from '../game/bots';
 import { createCarState } from '../physics/car';
-import { GHOST_NEAR_OPACITY, GHOST_OPACITY } from '../render/ghostCars';
+import { GHOST_OPACITY } from '../render/ghostCars';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { TUNING } from '../shared/tuning';
@@ -40,11 +40,11 @@ describe('ghost run', () => {
     expect(a[0].opacity).toBeCloseTo(GHOST_OPACITY);
   });
 
-  it('fades a ghost that sits on the player car', () => {
+  it('hides a ghost that sits on the player car', () => {
     const run = createGhostRun(track);
     // Countdown: every bot waits on the spawn pose, like the player.
     const views = run.views(1, true, createCarState(spawn.x, spawn.z, spawn.heading), FRAME);
-    for (const v of views) expect(v.opacity).toBeCloseTo(GHOST_NEAR_OPACITY);
+    for (const v of views) expect(v.opacity).toBe(0);
   });
 
   it('finish() fast-forwards the bots, freezes the ghosts where they were and fades them out', () => {

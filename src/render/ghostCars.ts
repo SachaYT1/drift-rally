@@ -15,11 +15,13 @@ import { formatPoints } from '../ui/format';
 import { applyPose } from './bridge';
 import { createCarModel, type CarModel } from './carModel';
 
-/** Ghost opacity away from the player's car, and right next to it (it never blocks the view). */
+/** Ghost opacity away from the player's car. */
 export const GHOST_OPACITY = 0.45;
-export const GHOST_NEAR_OPACITY = 0.1;
-/** Distance to the player's car, m: near opacity up to GHOST_FADE_NEAR, full beyond GHOST_FADE_FAR. */
-export const GHOST_FADE_NEAR = 8;
+/**
+ * Distance to the player's car, m: a ghost within GHOST_FADE_NEAR overlaps it (start grid) and is not drawn, so
+ * it never tints the player's car or piles labels on it; it fades in up to GHOST_OPACITY at GHOST_FADE_FAR.
+ */
+export const GHOST_FADE_NEAR = 4;
 export const GHOST_FADE_FAR = 14;
 /** Labels farther than this from the camera are hidden, m. */
 export const LABEL_MAX_DISTANCE = 250;
@@ -31,7 +33,7 @@ const LABEL_ORDER = 12;
 const MIN_VISIBLE_OPACITY = 0.01;
 /** Label: height above the ground (m), on-screen height (sizeAttenuation off: fraction of a unit at 1 m). */
 const LABEL_Y = 2.7;
-const LABEL_HEIGHT = 0.05;
+const LABEL_HEIGHT = 0.06;
 /** Label canvas, px (4:1); text redraws at most this often, s. */
 const LABEL_W = 512;
 const LABEL_H = 128;
@@ -62,8 +64,7 @@ export interface GhostLayer {
 /** Body opacity for a ghost `distance` m from the player's car, times `fade` (1 = fully in, 0 = gone). */
 export function ghostOpacity(distance: number, fade: number): number {
   const k = Number.isFinite(distance) ? clamp((distance - GHOST_FADE_NEAR) / (GHOST_FADE_FAR - GHOST_FADE_NEAR), 0, 1) : 1;
-  const s = k * k * (3 - 2 * k);
-  return (GHOST_NEAR_OPACITY + (GHOST_OPACITY - GHOST_NEAR_OPACITY) * s) * clamp(fade, 0, 1);
+  return GHOST_OPACITY * k * k * (3 - 2 * k) * clamp(fade, 0, 1);
 }
 
 interface Label {
