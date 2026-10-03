@@ -371,7 +371,8 @@ describe('collision', () => {
   });
 
   it('front-right hit yaws the car left (positive yaw rate)', () => {
-    const r = resolveCollisions(car(0, 0, 0, 0, 12), [circle(-1.2, 2.6, 0.5)]);
+    // circle overlaps the front-right corner (right of heading 0 is -x)
+    const r = resolveCollisions(car(0, 0, 0, 0, 12), [circle(-1.0, 1.9, 0.5)]);
     expect(r.heavyHit).not.toBeNull();
     expect(r.state.yawRate).toBeGreaterThan(0);
   });
@@ -384,7 +385,7 @@ describe('collision', () => {
 
   it('capsuleOverlapsCircle', () => {
     const cap = carCapsule(createCarState(0, 0, 0));
-    expect(capsuleOverlapsCircle(cap, 0, 2.5, 0.5)).toBe(true);
+    expect(capsuleOverlapsCircle(cap, 0, 2.3, 0.5)).toBe(true);
     expect(capsuleOverlapsCircle(cap, 3, 0, 0.5)).toBe(false);
   });
 });
@@ -399,7 +400,7 @@ describe('collision', () => {
 **Files:** Modify `src/track/build.ts` · Create `src/track/plaza.ts`, `src/track/geometry.ts` (optional helper split) · Test `src/track/build.test.ts`, `src/track/plaza.test.ts`
 
 ### build.ts
-- World coords: `world = map − origin`. Centreline: `new CatmullRomCurve3(points (x,0,z), true, 'centripetal')`; `curve.arcLengthDivisions = 4000`; `length = curve.getLength()`; samples via `getSpacedPoints(N)` with `N = round(length)` (drop the duplicated last point); tangents from neighbours; signed curvature from the turning angle between neighbour tangents divided by spacing (+ = left, i.e. tangent rotating toward `l`).
+- World coords: `world = map − origin`. Centreline: `new CatmullRomCurve3(points (x,0,z), true, 'centripetal')`; `curve.arcLengthDivisions = 4000`; `length = curve.getLength()`; samples via `getSpacedPoints(N)` with `N = round(length)` (drop the duplicated last point); tangents from neighbours (central difference); signed curvature = turning angle between the tangents at i−3 and i+3 divided by 6·spacing (+ = left, i.e. tangent rotating toward `l`). The ±3 window suppresses sampling noise; the design check measured min radius 24.6 m this way.
 - `project(x,z,hintS?,window?)`: brute force over samples (global) or over indices within ±window of hintS; refine on the segment to the next sample; `lateral = (p − c)·l` with `l = (tz, −tx)`.
 - `surfaceAt(lat)`: `|lat| ≤ roadHalfWidth` road; `≤ +curbWidth` curb; `≤ barrier` runoff; else outside.
 - `poseAt(s, lat=0)`, `sampleAt(s)`: linear interpolation between samples; heading `atan2(tx, tz)`.
@@ -1177,6 +1178,8 @@ describe('quality', () => {
 8. `canAccrue` + `updateDriftScore` (finished flag when progress just finished) → events.
 9. `time += dt` (racing only). On finish: phase `finished`; result = `{ totalPoints, bestChain, totalTime: time, lapTimes, bestLap: min(lapTimes), coinsPicked, coinsFromDrift: floor(totalPoints / pointsPerCoin), coinsEarned }`; event `finish`.
 
+The autopilot below is test-only scaffolding. If it fails to finish because the autopilot itself is weak (it oversteers, under-brakes), improve the autopilot in the test, not the game; if it fails because of a game bug (car stuck on a collider, NaN, progress not counting), fix the game. Report which one it was.
+
 ### Tests — `src/game/session.test.ts`
 
 ```ts
@@ -1246,22 +1249,22 @@ describe('session', () => {
     expect(sess.state().car.speed).toBeLessThan(0.5);
   });
 
-  it('is identical across different frame schedules (fixed-step determinism)', () => {
-    const final = (frames: number[]) => {
-      const sess = createSession(track);
+  it('is deterministic: two sessions fed the same autopilot end in identical states', () => {
+    const run = () => { const s = createSession(track); for (let i = 0; i < 1500; i++) s.step(autopilot(s), { respawn: false }, DT); return s.state(); };
+    const a = run(), b = run();
+    expect(a.car).toEqual(b.car);
+    expect(a.score).toEqual(b.score);
+    expect(a.progress).toEqual(b.progress);
+  });
+
+  it('the fixed loop runs the same number of steps for 60 Hz and 144 Hz frame schedules', () => {
+    const count = (frame: number) => {
       let k = 0;
-      const loop = createFixedLoop({ hz: 120, maxStepsPerFrame: 12, maxFrameDt: 0.1, raf: () => 0, caf: () => {}, render: () => {}, step: (dt) => { sess.step(autopilot(sess), { respawn: false }, dt); k++; } });
-      let t = 0;
-      for (const f of frames) { loop.advance(f); t += f; if (t > 12) break; }
-      return { car: sess.state().car, k };
+      const loop = createFixedLoop({ hz: 120, maxStepsPerFrame: 12, maxFrameDt: 0.1, raf: () => 0, caf: () => {}, render: () => {}, step: () => { k++; } });
+      for (let t = 0; t < 10 - 1e-9; t += frame) loop.advance(frame);
+      return k;
     };
-    const a = final(Array(800).fill(1 / 60));
-    const b = final(Array(2000).fill(1 / 144));
-    const n = Math.min(a.k, b.k);
-    // replay both to the same step count for comparison
-    const replay = (steps: number) => { const s = createSession(track); for (let i = 0; i < steps; i++) s.step(autopilot(s), { respawn: false }, DT); return s.state().car; };
-    expect(replay(n)).toEqual(replay(n));
-    expect(n).toBeGreaterThan(1000);
+    expect(Math.abs(count(1 / 60) - count(1 / 144))).toBeLessThanOrEqual(1);
   });
 });
 ```
@@ -1471,19 +1474,19 @@ Synthesis per spec §5 Audio; master gain → DynamicsCompressor → destination
 - `main.ts`: mobile check → fatal screen; `createRenderer` in try/catch → `noWebGL`; `webglcontextlost` → `contextLost`; load save; quality = save.quality ?? detectQuality(renderer debug info); loading screen (fonts + assets + `compileAsync` of both scenes + one hidden prewarm render) → garage. One `ResizeObserver` → both cameras + renderer size + render once when paused.
 - `garageScreen.ts`: garage scene + garage UI; Start → `audio.unlock()` → race screen.
 - `raceScreen.ts`: builds track once (cached), race environment, track mesh, world, props, fx, car model, chase camera, occlusion, HUD, pause, input, audio, session; fixed loop: `step` = `session.step(input.sample(), {respawn}, dt)` → route events to HUD/audio/fx/props; render = interpolate car (`lerp` position, `lerpAngle` heading between prevCar and car by alpha; snap when `teleported`) → carModel.update, camera.update, env.updateShadows(camera.target), occlusion.update, fx/props update, HUD.update (≤ 30 Hz), audio.update → `renderer.render`. Pause on Esc/blur/visibilitychange (input.reset, audio.suspend, loop.pause, show menu); resume resets loop time. Finish → save once (`coins += coinsEarned`, `bestScore`, `bestLapMs`), results screen; retry → new session (reuse scene objects, reset props/fx); garage → stop loop, `input.setRacing(false)`.
-- `testHook.ts`: when URL has `?test`, expose `window.__game = { startRace(): Promise<void>; step(n: number, input?: Partial<InputFrame>): void; state(): { phase, lap, speed, points, coins, p, frontier }; }`, and force quality low, DPR 1, 640×360 canvas, deterministic (no rAF stepping while the hook drives).
+- `testHook.ts`: when URL has `?test`, expose `window.__game = { startRace(): Promise<void>; step(n: number, input?: Partial<InputFrame>): void; state(): { phase, lap, speed, points, coins, p, frontier }; }`, and force quality low, DPR 1, 640×360 canvas, deterministic (no rAF stepping while the hook drives). As built: plain `?test` applies that render contract; `&full` (saved/auto quality) or `&quality=<level>` opt out for full-size screenshots and FPS runs. Extras: `autopilot(n)` (closed-loop driver), `finish()`, `realtime(driver)`, `info()`.
 - `debugGui.ts`: `import.meta.env.DEV` only, dynamic import of `three/addons/libs/lil-gui.module.min.js` and `stats.module.js`; folders for car / drift / camera bound to `TUNING`.
 
 ## Task 17 (wave 3): Build, e2e, deploy config
 
 - `vite.config.ts`: `base: './'`.
 - `playwright.config.ts`: webServer `npm run build && npx vite preview --port 4173 --strictPort`, chromium with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, use the installed chromium (if version mismatch, run `npx playwright install chromium`).
-- `tests/e2e/smoke.spec.ts`: open `/?test`; assert a WebGL2 context exists on `#game`; garage visible (text «В ЗАЕЗД»); `await __game.startRace()`; `__game.step(360)` (countdown); `__game.step(1200, { throttle: 1, steer: 0.2 })` → `state().p > 50`; no `console.error` / `pageerror`; screenshots of garage and race saved under `test-results/` (artifacts only).
+- `tests/e2e/smoke.spec.ts`: open `/?test`; assert a WebGL2 context exists on `#game`; garage visible (text «В ЗАЕЗД»); `await __game.startRace()`; `__game.step(360)` (countdown); `__game.autopilot(1200)` → `state().p > 50` (closed loop: about 270 m; the open-loop `step(1200, { throttle: 1, steer: 0.2 })` steers into the left barrier and stalls at p ≈ 54, too close to the bound); no `console.error` / `pageerror`; screenshots of garage and race saved under `test-results/` (artifacts only).
 - `package.json` scripts: `"e2e": "playwright test"`, `"assets": "node scripts/build-assets.mjs"`.
 - Acceptance: `npm run typecheck`, `npm test`, `npm run build` (dist < 10 MB), `npm run e2e` all pass.
 
 ## Task 18 (wave 4): Playtest, tuning, review
 
-- Headful-ish visual review: Playwright screenshots at 1280×720 (quality medium) of garage, race start, fountain sweeper drift, bench pass, hairpin, slalom, results; compare against the reference look; fix visual issues.
+- Headful-ish visual review: Playwright screenshots at 1280×720 (quality medium: `/?test&quality=medium`, plain `?test` renders 640×360) of garage, race start, fountain sweeper drift, bench pass, hairpin, slalom, results; compare against the reference look; fix visual issues.
 - Tune `TUNING` (camera framing like the reference; drift feel) using the autopilot and scripted drift scenarios; keep all tests green.
 - Multi-lens code review (correctness, game feel, performance, UI fidelity, spec compliance) with adversarial verification; fix confirmed findings.

@@ -7,3 +7,7 @@ playwright-report
 .superpowers
 .claude/logs/
 *.log
+
+# Third-party reference screenshots: local only, never publish
+plan/reference/garage.png
+plan/reference/race-camera.png
