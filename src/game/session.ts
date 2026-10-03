@@ -6,6 +6,7 @@ import { resolveCollisions } from '../physics/collision';
 import type { Track } from '../track/build';
 import { canAccrue, createDriftScore, updateDriftScore, type DriftScoreState } from './driftScore';
 import { createPickups, resetLap, updatePickups, type PickupState } from './pickups';
+import { createBombs, resetBombs, updateBombs, type BombState } from './bombs';
 import { createProgress, respawn, startGrace, updateProgress, type ProgressState } from './progress';
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
@@ -30,6 +31,8 @@ export interface SessionState {
   progress: ProgressState;
   score: DriftScoreState;
   pickups: PickupState;
+  /** Bombs blown in the current lap. */
+  bombs: BombState;
   /**
    * Per-collider seconds until it may emit another 'scrape'. Every eligible contact and every heavy hit
    * (re)starts it. Heavy hits ignore it: they always emit 'hit' (see contactEvent).
@@ -120,6 +123,7 @@ function initialState(cfg: SessionConfig, bestLap: number | null): SessionState 
     progress,
     score: createDriftScore(),
     pickups: createPickups(),
+    bombs: createBombs(),
     hitCooldowns: {},
     bestLap,
     result: null,
@@ -163,7 +167,7 @@ function stepCountdown(s: SessionState, cfg: SessionConfig, dt: number): StepRes
 // ---------------------------------------------------------------------------
 
 /**
- * One racing step: respawn -> car -> collisions -> pickups -> progress -> drift score -> finish.
+ * One racing step: respawn -> car -> collisions -> pickups -> bombs -> progress -> drift score -> finish.
  * Event order within a step follows the same sequence.
  */
 function stepRacing(
@@ -209,6 +213,13 @@ function stepRacing(
   let pickups = pu.state;
   events.push(...pu.events);
 
+  // 4b. Bombs: a blast throws the car into recovery and, like a heavy hit, starts the wrong-way grace.
+  const bm = updateBombs(s.bombs, track, car, t);
+  car = bm.car;
+  let bombs = bm.state;
+  events.push(...bm.events);
+  if (bm.blasted) progress = startGrace(progress, t);
+
   // 5. Progress and laps. Lap times use the race time at the END of this step.
   const time = s.time + dt;
   const pr = updateProgress(progress, track, car, time, dt, cfg.laps, t);
@@ -224,9 +235,12 @@ function stepRacing(
     if (bestLap === null || e.lapTime < bestLap) bestLap = e.lapTime;
     events.push({ ...e, best });
   }
-  // An item still touching the car here would re-trigger next step; track data keeps coins and light
-  // props out of reach of the start line (guarded in session.test.ts).
-  if (pr.lapCompleted) pickups = resetLap(pickups);
+  // An item still touching the car here would re-trigger next step; track data keeps coins, light props
+  // and bombs out of reach of the start line (guarded in session.test.ts).
+  if (pr.lapCompleted) {
+    pickups = resetLap(pickups);
+    bombs = resetBombs(bombs);
+  }
   const justFinished = progress.finished && !s.progress.finished;
 
   // 6. Drift score, judged on the surface under the car after this step.
@@ -243,7 +257,7 @@ function stepRacing(
       progressSpeed: progress.progressSpeed,
       heavyHit,
       respawned,
-      bombed: false,
+      bombed: bm.blasted,
       propsKnocked: pu.knocked,
       finished: justFinished,
     },
@@ -263,6 +277,7 @@ function stepRacing(
     progress,
     score: ds.state,
     pickups,
+    bombs,
     hitCooldowns: contact.cooldowns,
     bestLap,
   };
