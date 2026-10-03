@@ -60,9 +60,9 @@ export function mountFriends(el: HTMLElement, port: LeaderboardPort): FriendsVie
       port,
       submitLabel: initial === undefined ? 'В таблицу' : 'Сохранить',
       initial,
-      onCancel: initial === undefined ? undefined : () => renderMe(),
+      onCancel: initial === undefined ? undefined : () => renderMe(true),
       onDone: () => {
-        renderMe();
+        renderMe(true);
         void load();
       },
     });
@@ -70,13 +70,15 @@ export function mountFriends(el: HTMLElement, port: LeaderboardPort): FriendsVie
     if (initial !== undefined) form.focus();
   }
 
-  function renderMe(): void {
+  /** `refocus`: the form had focus; hand it to «Сменить ник» instead of dropping it to the page. */
+  function renderMe(refocus = false): void {
     dropForm();
     const nick = port.nick();
     if (nick !== null) {
       meEl.innerHTML = `<p class="dr-friends__text">Ты в таблице как <b class="dr-friends__nick"></b>
         <button type="button" class="dr-link" data-act="rename">Сменить ник</button></p>`;
       qs(meEl, '.dr-friends__nick').textContent = nick;
+      if (refocus) qs(meEl, '[data-act="rename"]').focus({ preventScroll: true });
     } else if (port.canJoin()) {
       showForm(undefined);
     } else {

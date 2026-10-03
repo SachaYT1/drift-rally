@@ -124,8 +124,12 @@ async function boot(): Promise<void> {
   });
 
   const loading = showLoading(ui);
-  // Reads app.save once the app exists (the boot save before that).
-  const leaderboard = createLeaderboard({ api: createLeaderboardApi(), save: () => app?.save ?? save });
+  // Reads app.save once the app exists (the boot save before that). Test runs stay off the live table unless
+  // they ask for it with `&leaderboard` (and mock the network).
+  const leaderboard =
+    test.enabled && !params.has('leaderboard')
+      ? null
+      : createLeaderboard({ api: createLeaderboardApi(), save: () => app?.save ?? save });
   const track = buildTrack(PLAZA);
   const scenes = await loadScenes(renderer, track, quality, (f) => loading.setProgress(f));
   app = createApp({
@@ -144,7 +148,7 @@ async function boot(): Promise<void> {
     leaderboard,
   });
   // Finishes an earlier session could not send (offline, paused project).
-  void leaderboard.flush();
+  void leaderboard?.flush();
   const appRef = app;
   // The garage shows another tab's coins as they arrive: count them as shown, so they do not pop again later.
   appRef.onSaveChanged((s) => {

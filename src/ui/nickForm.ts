@@ -17,6 +17,7 @@ const ERRORS: Record<string, string> = {
   invalid: HINT,
   unavailable: 'Таблица недоступна — попробуй позже',
   rejected: 'Таблица не приняла результат',
+  busy: 'Подожди пару секунд и попробуй снова',
   no_result: 'Сначала финишируй заезд',
 };
 
@@ -73,8 +74,10 @@ export function createNickForm(opts: NickFormOptions): NickForm {
 
   function setBusy(on: boolean): void {
     busy = on;
-    input.disabled = on;
+    // readOnly, not disabled: a disabled field drops focus to <body>, where a second Enter would mean «Ещё раз».
+    input.readOnly = on;
     submit.disabled = on;
+    el.setAttribute('aria-busy', String(on));
   }
 
   async function check(value: string, at: number): Promise<void> {

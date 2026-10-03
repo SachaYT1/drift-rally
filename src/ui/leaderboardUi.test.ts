@@ -111,12 +111,16 @@ describe('nick form (jsdom)', () => {
     const input = form.el.querySelector('input')!;
     const msg = form.el.querySelector<HTMLElement>('.dr-nick__msg')!;
 
+    input.focus();
     input.value = 'Ёжик';
     submit(form.el);
-    expect(input.disabled).toBe(true);
+    // Read-only while sending, focus stays in the field (a disabled one would drop it to the page).
+    expect(input.readOnly).toBe(true);
+    expect(form.el.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(input);
     await flush();
     expect(msg.textContent).toBe('Ник занят, выбери другой');
-    expect(input.disabled).toBe(false);
+    expect(input.readOnly).toBe(false);
     expect(onDone).not.toHaveBeenCalled();
 
     input.value = 'Ёжик2';
@@ -224,6 +228,27 @@ describe('results screen friends slot (jsdom)', () => {
     expect(port.setNick).toHaveBeenCalledWith('Ёжик');
     expect(norm(slot.textContent)).toBe('Место в таблице: #3 из 12');
     screen.destroy();
+  });
+
+  it('a second Enter while the nick is being sent does not restart the race', async () => {
+    let answer: (r: NickResult) => void = () => {};
+    const port = fakePort({ setNick: vi.fn(() => new Promise<NickResult>((r) => (answer = r))) });
+    const onRetry = vi.fn();
+    vi.spyOn(performance, 'now').mockReturnValue(1e9); // past the screen's arming delay
+    const screen = open(Promise.resolve({ kind: 'noNick' }), port, onRetry);
+    await flush();
+    const slot = root.querySelector('[data-ref="lb"]')!;
+    const input = slot.querySelector('input')!;
+    input.focus();
+    input.value = 'Ёжик';
+    submit(slot.querySelector('form')!);
+    keydown('Enter');
+    expect(onRetry).not.toHaveBeenCalled();
+    answer({ ok: true, standing: standing('Ёжик') });
+    await flush();
+    expect(norm(slot.textContent)).toBe('Место в таблице: #3 из 12');
+    screen.destroy();
+    vi.restoreAllMocks();
   });
 
   it('has no slot without a leaderboard', () => {

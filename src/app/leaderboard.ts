@@ -5,6 +5,9 @@
  */
 import type { SaveData } from '../shared/types';
 import {
+  LAP_MS_MAX,
+  LAP_MS_MIN,
+  SCORE_MAX,
   sameNick,
   validateNick,
   type BoardLoad,
@@ -37,6 +40,18 @@ export interface LeaderboardDeps {
 /** A finished race exists: a lap time, or points. */
 function hasResult(save: Readonly<SaveData>): boolean {
   return save.bestLapMs !== null || save.bestScore > 0;
+}
+
+/**
+ * The save's bests within the table's limits: a score above the cap is sent as the cap and an implausible lap
+ * as none, so a record the table would refuse cannot keep the player off it for good.
+ */
+function bests(save: Readonly<SaveData>): { score: number; lapMs: number | null } {
+  const lap = save.bestLapMs;
+  return {
+    score: Math.min(SCORE_MAX, Math.max(0, Math.floor(save.bestScore))),
+    lapMs: lap !== null && lap >= LAP_MS_MIN && lap <= LAP_MS_MAX ? Math.round(lap) : null,
+  };
 }
 
 export function createLeaderboard(d: LeaderboardDeps): Leaderboard {
@@ -73,9 +88,8 @@ export function createLeaderboard(d: LeaderboardDeps): Leaderboard {
 
   /** Send the save's bests with the pending finishes under the stored key and nick. */
   async function sendPending(id: Identity & { key: string; nick: string }): Promise<Placement> {
-    const save = d.save();
     const races = Math.min(MAX_PENDING, Math.max(1, id.pendingRaces));
-    const r = await d.api.submit({ key: id.key, nick: id.nick, score: save.bestScore, lapMs: save.bestLapMs, races });
+    const r = await d.api.submit({ key: id.key, nick: id.nick, ...bests(d.save()), races });
     if (r.ok) {
       settle(id.pendingRaces, r.value);
       return { kind: 'placed', place: r.value.place, total: r.value.total };
@@ -86,7 +100,6 @@ export function createLeaderboard(d: LeaderboardDeps): Leaderboard {
         store({ ...load(), nick: null });
         return { kind: 'noNick' };
       case 'rejected':
-      case 'unknown_player':
         // Retrying the same bests cannot succeed.
         store({ ...load(), pendingRaces: 0 });
         return { kind: 'rejected' };
@@ -105,7 +118,7 @@ export function createLeaderboard(d: LeaderboardDeps): Leaderboard {
     // Persist the key before sending: if the reply is lost, a retry must come from the same owner.
     const id = store({ ...load(), key: load().key ?? makeKey() });
     const races = Math.min(MAX_PENDING, Math.max(1, id.pendingRaces));
-    const r = await d.api.submit({ key: id.key!, nick, score: save.bestScore, lapMs: save.bestLapMs, races });
+    const r = await d.api.submit({ key: id.key!, nick, ...bests(save), races });
     if (r.ok) {
       settle(id.pendingRaces, r.value);
       return { ok: true, standing: r.value };
@@ -167,8 +180,8 @@ export function createLeaderboard(d: LeaderboardDeps): Leaderboard {
   };
 }
 
-function nickError(e: string): 'nick_taken' | 'rejected' | 'unavailable' {
-  if (e === 'nick_taken') return 'nick_taken';
-  if (e === 'rejected') return 'rejected';
+function nickError(e: string): 'nick_taken' | 'rejected' | 'busy' | 'unavailable' {
+  if (e === 'nick_taken' || e === 'rejected') return e;
+  if (e === 'rate_limited') return 'busy';
   return 'unavailable';
 }

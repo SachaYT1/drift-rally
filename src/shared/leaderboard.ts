@@ -57,10 +57,18 @@ export type Placement =
 /** A nick typed by the player: free, taken, not a valid nick, or unknown (no answer from the table). */
 export type NickStatus = 'free' | 'taken' | 'invalid' | 'unknown';
 
-/** Claiming or changing a nick. no_result: nothing to put on the table yet (no finished race). */
+/**
+ * Claiming or changing a nick. no_result: nothing to put on the table yet (no finished race); busy: the table
+ * asked to wait (rate limit).
+ */
 export type NickResult =
   | { ok: true; standing: Standing }
-  | { ok: false; error: 'nick_taken' | 'invalid' | 'unavailable' | 'rejected' | 'no_result' };
+  | { ok: false; error: 'nick_taken' | 'invalid' | 'unavailable' | 'rejected' | 'no_result' | 'busy' };
+
+/** The table's limits (submit_result): bests outside them are refused. */
+export const SCORE_MAX = 200_000;
+export const LAP_MS_MIN = 30_000;
+export const LAP_MS_MAX = 3_600_000;
 
 /** What the garage's friends table loads. */
 export type BoardLoad = { ok: true; board: Board } | { ok: false };

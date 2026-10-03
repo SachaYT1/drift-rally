@@ -13,7 +13,8 @@
 
 ## Architecture
 
-- Supabase project `brezucvcujjioibrmerd`, migration `supabase/migrations/20261003150000_leaderboard.sql`.
+- Supabase project `brezucvcujjioibrmerd`, migrations `supabase/migrations/20261003150000_leaderboard.sql` and
+  `20261003170000_leaderboard_new_player_limit.sql`.
 - Table `public.leaderboard`: nick (unique, case-insensitive), sha256 of the browser key, best score, best
   lap (ms), races, updated_at (bests improved), submitted_at (rate limit).
 - **Browser key**: on the first nick the game generates 32 random bytes (64 hex chars) and keeps them in
@@ -22,7 +23,8 @@
 - **Writes** only through RPC (`SECURITY DEFINER`, `search_path = ''`):
   - `submit_result(p_key, p_nick, p_score, p_lap_ms, p_races)`: creates or updates the player, keeps the
     better of stored/sent bests, renames when the nick changed. Limits: score 0..200 000, lap 30 s..1 h,
-    races 1..100 per call, at most one call per 10 s per player.
+    races 1..100 per call, at most one call per 10 s per player, at most 20 new players per minute across the
+    table (stops a script minting fresh keys from flooding the top or squatting nicks).
   - `rename_player(p_key, p_nick)`.
   - `nick_available(p_nick)` (`SECURITY INVOKER`, reads only the public nick column).
   - Errors are `P0001` with the message as a code: `bad_key`, `bad_nick`, `bad_score`, `bad_lap`, `bad_races`,
@@ -32,7 +34,10 @@
   is unreadable even directly.
 - The private helpers live in schema `leaderboard_private`, which the Data API does not expose.
 - **Client**: plain `fetch` to the REST API (no SDK). Project URL and publishable key live in the code; the key
-  is public by design, the access rules protect the data.
+  is public by design, the access rules protect the data. The client sends the save's bests clamped to the
+  table's limits (score capped, an implausible lap as none), so a record outside them never locks the player out.
+- **Test mode**: `?test` runs keep the leaderboard off (no traffic to the live table); `?test&leaderboard` turns it
+  on for the e2e spec, which mocks the API with `page.route`.
 
 ### Client modules
 
@@ -48,7 +53,7 @@
 
 Every finish increments `pendingRaces`. With a nick, the service sends `{ bestScore, bestLapMs }` from the save
 plus `pendingRaces`, and resets the counter on success. `rate_limited` / network failures keep it for the next
-launch; `bad_*` rejections drop it (retrying cannot succeed). `nick_taken` on an automatic submit clears the
+launch (a rate-limited nick claim asks the player to wait a moment); `bad_*` rejections drop it (retrying cannot succeed). `nick_taken` on an automatic submit clears the
 nick so the player picks a new one.
 
 ## Honest limitations

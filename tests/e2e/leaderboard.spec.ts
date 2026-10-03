@@ -97,7 +97,7 @@ class FakeTable {
 
 async function openGame(page: Page, table: FakeTable): Promise<void> {
   await page.route(`${API}**`, (route) => table.handle(route));
-  await page.goto('./?test');
+  await page.goto('./?test&leaderboard');
   await expect(page.locator('.dr-cta')).toBeVisible({ timeout: 120_000 });
 }
 

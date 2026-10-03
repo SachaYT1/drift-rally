@@ -181,6 +181,19 @@ describe('leaderboard service: nick', () => {
     expect(api.nickAvailable).toHaveBeenCalledTimes(2);
   });
 
+  it('sends bests within the table limits: a capped score, an implausible lap as none', async () => {
+    const storage = mem();
+    saveIdentity({ key: KEY, nick: 'Ёжик', pendingRaces: 0 }, storage);
+    const { lb, api } = setup({ storage, save: { ...DEFAULT_SAVE, bestScore: 250_000.7, bestLapMs: 12_000 } });
+    await lb.recordFinish();
+    expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ score: 200_000, lapMs: null }));
+  });
+
+  it('asks to wait when the table rate-limits a claim', async () => {
+    const { lb } = setup({ api: fakeApi({ submit: vi.fn(async () => err<Standing>('rate_limited')) }) });
+    expect(await lb.setNick('Ёжик')).toEqual({ ok: false, error: 'busy' });
+  });
+
   it('works on memory alone when storage is unavailable', async () => {
     const api = fakeApi();
     const lb = createLeaderboard({ api, save: () => RAN, storage: null, newKey: () => KEY });
