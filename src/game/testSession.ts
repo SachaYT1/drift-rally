@@ -1,7 +1,7 @@
 /** Test scaffolding shared by the session test files (not game code). */
 import type { Session } from './session';
 import type { Track } from '../track/build';
-import { createAutopilot } from '../app/autopilot';
+import { createAutopilot } from './autopilot';
 import { TUNING } from '../shared/tuning';
 import { NEUTRAL_INPUT, type GameEvent, type InputFrame } from '../shared/types';
 
@@ -18,7 +18,7 @@ export function runFor(sess: Session, seconds: number, input: (s: Session) => In
 }
 
 /**
- * The app's drift-aware autopilot (src/app/autopilot.ts, also behind the ?test hook) as a session driver,
+ * The drift-aware autopilot (src/game/autopilot.ts: the ghost bots, also behind the ?test hook) as a session driver,
  * so the session tests race the same driver the e2e smoke test and FPS runs use.
  */
 export function autopilotFor(track: Track): (sess: Session) => InputFrame {

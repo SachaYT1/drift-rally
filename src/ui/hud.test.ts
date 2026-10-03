@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHud, type Hud } from './hud';
+import { createHud, type Hud, type HudView } from './hud';
 import { MINUS } from './format';
 import { fakeAnimations, installDom, type FakeAnimation } from './domTestEnv';
 
@@ -149,6 +149,33 @@ describe('HUD (jsdom)', () => {
       expect(hint.classList.contains('is-on')).toBe(true);
       hud.showHint(false);
       expect(hint.classList.contains('is-on')).toBe(false);
+    });
+  });
+
+  describe('ghost standings', () => {
+    const VIEW: HudView = {
+      lap: 1, laps: 3, time: 12, bestLap: null, coins: 0, speed: 20, chainPoints: 0, multiplier: 1,
+      chainPhase: 'idle', totalPoints: 900, wrongWay: false,
+    };
+
+    it('stays hidden without standings (ghosts off)', () => {
+      hud.update(VIEW);
+      expect(q('.dr-standings').hidden).toBe(true);
+      hud.update({ ...VIEW, standings: null });
+      expect(q('.dr-standings').hidden).toBe(true);
+    });
+
+    it('shows the rows it gets', () => {
+      hud.update({
+        ...VIEW,
+        standings: [
+          { id: 'master', name: 'Мастер', color: 0xb070ff, points: 1500, finished: false },
+          { id: 'player', name: 'Ты', color: null, points: 900, finished: false },
+        ],
+      });
+      expect(q('.dr-standings').hidden).toBe(false);
+      expect(root.querySelectorAll('.dr-standings li')).toHaveLength(2);
+      expect(q('.dr-standings li.is-player .dr-standings__name').textContent).toBe('Ты');
     });
   });
 });

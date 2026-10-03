@@ -3,8 +3,9 @@
  * pause / resume and the finish (save once, then results). Retry and "back to garage" are decided by the
  * caller (raceScreen.ts), which destroys this run and starts another.
  *
- * Frame (design spec §5): N fixed steps (input sampled per step) -> interpolate the car between the last
- * two steps -> car model, camera, shadows, occlusion, effects, props -> HUD (<= 30 Hz) -> render.
+ * Frame (design spec §5): N fixed steps (input sampled per step; the ghost bots step with the player) ->
+ * interpolate the car and the ghosts between the last two steps -> car model, camera, shadows, occlusion,
+ * effects, props, ghosts -> HUD (<= 30 Hz) -> render.
  * In test-hook mode (`source` null) requestAnimationFrame only renders; stepNow() advances the simulation
  * and syncs the visuals after every fixed step, so effects stay continuous and deterministic.
  */
@@ -23,6 +24,8 @@ import { hintVisible, hudViewOf, parkedCar } from './raceView';
 import { inputOnPause, inputOnResume, type PauseCause } from './pauseInput';
 import type { RaceFrame } from './raceScene';
 import { bestLapSeconds, recordRaceResult, type SaveOutcome } from './saveResult';
+import { createGhostRun, type GhostRun } from './ghostRun';
+import { livePoints } from '../game/bots';
 
 /** Driving input for one fixed step. */
 export type InputSource = (st: Readonly<SessionState>) => InputFrame;
@@ -38,6 +41,8 @@ export interface RaceRunHooks {
 
 export interface RaceRun {
   readonly session: Session;
+  /** The ghost bots of this run; null: switched off in the garage. */
+  readonly ghosts: GhostRun | null;
   readonly paused: boolean;
   /** The session reported its finish (results may still be pending). */
   readonly finished: boolean;
@@ -62,6 +67,8 @@ const STEP_DT = 1 / TUNING.race.physicsHz;
 export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: InputSource | null): RaceRun {
   const { race, audio, input, ui } = app;
   const session = createSession(app.track, { bestLap: bestLapSeconds(app.save) });
+  // The garage switch is read once per run: toggling it applies from the next race.
+  const ghosts = app.save.ghosts ? createGhostRun(app.track) : null;
   let source = initialSource;
   /** Simulation seconds since the run began (countdown included); drives the coin animation. */
   let simClock = 0;
@@ -124,13 +131,15 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
       race.onEvent(e);
       if (e.type === 'finish') onFinish(e.result);
     }
+    // After the player's events (the finish saves first): the bots never come between the player and the save.
+    ghosts?.step(dt);
   }
 
   /**
    * Visual state for `car` (interpolated or the latest step). After the finish the session freezes the car
    * mid-motion: camera and model keep that pose, but the tyre effects see it parked so smoke stops.
    */
-  function syncVisuals(car: SessionState['car'], st: Readonly<SessionState>, dt: number): void {
+  function syncVisuals(car: SessionState['car'], st: Readonly<SessionState>, dt: number, alpha: number): void {
     frame.car = car;
     frame.effectsCar = finished ? parkedCar(car, parked) : car;
     frame.surface = st.surface;
@@ -138,6 +147,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     frame.bombs = st.bombs;
     frame.simTime = simClock;
     frame.snap = snapPending;
+    frame.ghosts = ghosts ? ghosts.views(alpha, car, dt) : null;
     race.sync(frame, dt);
     snapPending = false;
     audio.update(car, throttle, car.mode === 'drift', dt);
@@ -148,7 +158,9 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     hudAccum += dt;
     if (force || hudAccum >= HUD_INTERVAL) {
       hudAccum = 0;
-      hud.update(hudViewOf(st, hudView));
+      const view = hudViewOf(st, hudView);
+      view.standings = ghosts ? ghosts.standings({ points: livePoints(st.score), finished: st.phase === 'finished' }) : null;
+      hud.update(view);
     }
     const hint = hintVisible(st);
     if (hint !== hintShown) {
@@ -166,7 +178,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     },
     render(alpha, frameDt) {
       const st = session.state();
-      if (source) syncVisuals(interpolateCar(st.prevCar, st.car, alpha, snapPending, renderCar), st, frameDt);
+      if (source) syncVisuals(interpolateCar(st.prevCar, st.car, alpha, snapPending, renderCar), st, frameDt, alpha);
       hudTick(st, frameDt);
       draw();
       app.frameDone();
@@ -181,6 +193,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     outcome = { result, save: recordRaceResult(app, result) };
     // Sent while the «Финиш!» toast plays; the results screen shows the place when it arrives.
     placement = app.leaderboard?.recordFinish() ?? null;
+    // Every bot's final points for the HUD and the results; the ghosts fade out where they are.
+    ghosts?.finish();
     audio.setEngineActive(false);
     hudTick(session.state(), 0, true);
     resultsTimer = window.setTimeout(showResultsNow, RESULTS_DELAY_MS);
@@ -194,6 +208,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     input.setRacing(false);
     hudLive = false;
     hud.destroy();
+    // The ghosts may not have faded yet (results shown at once by the test hook, or a hidden tab froze the fade).
+    race.hideGhosts();
     draw();
     resultsUi = showResults(
       ui,
@@ -203,6 +219,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
         bestScore: app.save.bestScore,
         shareUrl: location.href.split(/[?#]/)[0],
         leaderboard: app.leaderboard && placement ? { placement, port: app.leaderboard } : null,
+        versus: ghosts ? ghosts.finalStandings(outcome.result.totalPoints) : null,
       },
       { onRetry: () => hooks.onRestart(), onGarage: () => hooks.onGarage() },
     );
@@ -272,6 +289,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
 
   return {
     session,
+    ghosts,
     get paused() {
       return paused;
     },
@@ -282,7 +300,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
       for (let i = 0; i < n && !paused && !finished && !destroyed; i++) {
         simStep(STEP_DT, src);
         const st = session.state();
-        syncVisuals(st.car, st, STEP_DT);
+        syncVisuals(st.car, st, STEP_DT, 1);
       }
     },
     setSource(next) {
