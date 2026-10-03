@@ -4,8 +4,10 @@
  * the race screen.
  */
 import type { SaveData } from '../shared/types';
+import type { CarId } from '../shared/cars';
 import { createGarageUI } from '../ui/garage';
 import type { App } from './context';
+import { purchaseCar, selectCar } from './carShop';
 
 export interface GarageScreen {
   /** Leave for the race. `gesture`: called from a user gesture (audio may be unlocked). */
@@ -16,7 +18,15 @@ export interface GarageScreen {
 /** Longest frame step the turntable advances, s (tab switches, debugger pauses). */
 const MAX_FRAME_DT = 0.1;
 
-export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStart(): void }): GarageScreen {
+export function enterGarage(
+  app: App,
+  opts: {
+    lastShown: SaveData | null;
+    onStart(): void;
+    /** Test preview (`?test&car=<id>`): open on this car without changing the save. */
+    previewCar?: CarId | null;
+  },
+): GarageScreen {
   const { garage, renderer } = app;
   let destroyed = false;
   let raf = 0;
@@ -27,7 +37,17 @@ export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStar
   app.input.setRacing(false);
   app.audio.setEngineActive(false);
 
-  // Built with the save shown last time, then updated: coins earned since then pop in the wallet.
+  const initialCar = opts.previewCar ?? app.save.selectedCar;
+  garage.setCar(initialCar);
+
+  /** The podium follows the browsed car; an owned one becomes the car of the next race. */
+  function browse(id: CarId): void {
+    garage.setCar(id);
+    if (app.save.ownedCars.includes(id) && app.save.selectedCar !== id) app.updateSave((s) => selectCar(s, id));
+  }
+
+  // Built with the save shown last time, then updated: coins earned since then pop in the wallet. A purchase
+  // writes through app.updateSave; onSaveChanged below brings the new save (card, wallet) back to the UI.
   const ui = createGarageUI(app.ui, {
     save: opts.lastShown ?? app.save,
     trackName: app.track.def.name,
@@ -35,6 +55,9 @@ export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStar
     onMute: (m) => app.setMuted(m),
     onGhosts: (on) => app.setGhosts(on),
     leaderboard: app.leaderboard,
+    initialCar,
+    onBrowse: browse,
+    onBuy: (id) => purchaseCar(app, id).ok,
   });
   if (opts.lastShown) ui.update(app.save);
   // Coins or records saved by another tab while this garage is up.

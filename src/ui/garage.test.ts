@@ -294,7 +294,7 @@ describe('enterGarage mute wiring (jsdom)', () => {
     });
     const app = {
       ui: root,
-      garage: { scene: {}, camera: {}, update: () => {} },
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: () => {} },
       renderer: { render: () => {} },
       track: { def: { name: 'Площадь' } },
       input: { setRacing: () => {} },
@@ -316,6 +316,45 @@ describe('enterGarage mute wiring (jsdom)', () => {
     expect(setMuted).toHaveBeenLastCalledWith(false);
     click(root.querySelector('.dr-ghosts')!);
     expect(setGhosts).toHaveBeenLastCalledWith(false);
+    screen.destroy();
+    root.remove();
+  });
+});
+
+describe('enterGarage line-up wiring (jsdom)', () => {
+  it('shows the browsed car on the podium and selects it when owned', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let save: SaveData = { ...SAVE, ownedCars: ['iskra', 'ronin'] };
+    const shown: string[] = [];
+    const selected: string[] = [];
+    const app = {
+      ui: root,
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: (id: string) => shown.push(id) },
+      renderer: { render: () => {} },
+      track: { def: { name: 'Площадь' } },
+      input: { setRacing: () => {} },
+      audio: { setEngineActive: () => {}, unlock: () => Promise.resolve() },
+      get save() {
+        return save;
+      },
+      updateSave: (change: (s: SaveData) => SaveData) => {
+        save = change(save);
+        selected.push(save.selectedCar);
+        return save;
+      },
+      setMuted: () => {},
+      onSaveChanged: () => () => {},
+      screen: 'loading',
+      redraw: null,
+      frameDone: () => {},
+    } as unknown as App;
+    const screen = enterGarage(app, { lastShown: null, onStart: () => {} });
+    expect(shown).toEqual(['iskra']);
+    keydown('ArrowRight'); // Квадро: not owned
+    keydown('ArrowRight'); // Ронин: owned
+    expect(shown).toEqual(['iskra', 'quadro', 'ronin']);
+    expect(selected).toEqual(['ronin']);
     screen.destroy();
     root.remove();
   });

@@ -21,6 +21,7 @@ import { enterGarage, type GarageScreen } from './garageScreen';
 import { enterRace, type RaceScreen } from './raceScreen';
 import { installTestHook } from './testHook';
 import { createLeaderboard } from './leaderboard';
+import { isCarId } from '../shared/cars';
 
 declare global {
   interface Window {
@@ -52,6 +53,9 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // `?test`: render contract (low, pixel ratio 1, <= 640x360) unless `&full` / `&quality=` opt out.
   const { test, quality: forced } = testFlagsFrom(params);
+  // `?test&car=<id>`: the garage opens on that car (screenshots of every body); the save is not changed.
+  const carParam = params.get('car');
+  const previewCar = test.enabled && isCarId(carParam) ? carParam : null;
   const canvas = byId<HTMLCanvasElement>('game');
   const ui = byId('ui');
 
@@ -66,7 +70,7 @@ async function boot(): Promise<void> {
   function goGarage(): void {
     if (!app || halted) return;
     raceScreen = null;
-    garageScreen = enterGarage(app, { lastShown: lastShownSave, onStart: goRace });
+    garageScreen = enterGarage(app, { lastShown: lastShownSave, onStart: goRace, previewCar });
     lastShownSave = app.save;
   }
 
