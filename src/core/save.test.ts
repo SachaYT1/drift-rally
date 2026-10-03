@@ -65,10 +65,22 @@ describe('save edge cases', () => {
     const withExtra = { ...data, debug: { huge: true } };
     expect(writeSave(withExtra, s)).toBe(true);
     expect(Object.keys(JSON.parse(s.getItem(SAVE_KEY) ?? '{}')).sort()).toEqual(
-      ['bestLapMs', 'bestScore', 'coins', 'muted', 'quality', 'version'],
+      ['bestLapMs', 'bestScore', 'coins', 'ghosts', 'muted', 'quality', 'version'],
     );
   });
   it('write returns false without storage', () => expect(writeSave(data, null)).toBe(false));
+  it('ghost bots default to on, also for saves written before the setting existed', () => {
+    expect(DEFAULT_SAVE.ghosts).toBe(true);
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ version: 1, coins: 3, bestScore: 10, bestLapMs: null, quality: null, muted: false }));
+    expect(loadSave(s)).toEqual({ ...DEFAULT_SAVE, coins: 3, bestScore: 10, ghosts: true });
+  });
+  it('keeps ghost bots off and drops a non-boolean setting', () => {
+    const s = mem();
+    expect(writeSave({ ...data, ghosts: false }, s)).toBe(true);
+    expect(loadSave(s).ghosts).toBe(false);
+    s.setItem(SAVE_KEY, JSON.stringify({ version: 1, ghosts: 'no' }));
+    expect(loadSave(s).ghosts).toBe(true);
+  });
 
   describe('default storage (localStorage)', () => {
     afterEach(() => {

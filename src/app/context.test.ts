@@ -205,6 +205,22 @@ describe('save shared between tabs', () => {
     expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, muted: true, quality: 'high' });
   });
 
+  it('the ghost bots setting patches only its own field and stays this tab\'s live setting', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    recordRaceResult(b, race({ coinsEarned: 40 }));
+    a.setGhosts(false);
+    expect(a.save.ghosts).toBe(false);
+    expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, ghosts: false });
+    // Another tab's toggle does not flip this tab's setting; its own progress still arrives.
+    b.setGhosts(true);
+    recordRaceResult(b, race({ coinsEarned: 2 }));
+    expect(a.save).toMatchObject({ coins: 42, ghosts: false });
+  });
+
   it('a quality override (test mode) is never persisted', () => {
     const browser = browserStorage();
     const t1 = browser.tab();

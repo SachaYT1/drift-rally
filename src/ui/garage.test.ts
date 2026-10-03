@@ -9,7 +9,7 @@ import { click, fakeAnimations, installDom, keydown } from './domTestEnv';
 const win = await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium', muted: false };
+const SAVE: SaveData = { version: 1, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium', muted: false, ghosts: true };
 
 const norm = (s: string | null): string => (s ?? '').replace(/\s+/g, ' ');
 

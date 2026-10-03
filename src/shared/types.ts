@@ -256,4 +256,6 @@ export interface SaveData {
   /** null = auto-detect. */
   quality: QualityLevel | null;
   muted: boolean;
+  /** Race the ghost bots (plan/2026-10-04-ghost-bots-design.md). Absent in older saves: on. */
+  ghosts: boolean;
 }

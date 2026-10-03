@@ -20,7 +20,7 @@ const RESULT: RaceResult = {
   coinsFromDrift: 1,
   coinsEarned: 4,
 };
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium', muted: false };
+const SAVE: SaveData = { version: 1, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium', muted: false, ghosts: true };
 
 const standing = (nick: string, place = 3, total = 12): Standing => ({ nick, place, total, score: 1500, lapMs: 52000 });
 const norm = (s: string | null | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
