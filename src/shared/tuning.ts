@@ -155,6 +155,21 @@ export const TUNING = {
     iterations: 3,
     /** Seconds before the same collider can emit another scrape event (heavy hits always report). */
     cooldown: 0.3,
+    /**
+     * Wall slide: a scrape (no heavy hit that step) with the nose into an obstacle turns the nose toward the
+     * obstacle's surface tangent in the direction of travel, so W slides the car along a barrier instead of
+     * grinding it into it. Turn rate = slideAlignGain (1/s) per radian of heading error, kept within
+     * [slideAlignMinRate, slideAlignMaxRate] (rad/s; the floor reaches parallel in finite time, so the car
+     * leaves the wall instead of grazing it, and scrapeFriction, forever); times slideDriftScale in drift mode
+     * (a drift kissing the wall is not spun). Slower than slideTravelSpeed along the surface (m/s), the nose
+     * turns toward the track's driving direction instead: a pinned car is turned back onto the course, never
+     * into the wrong way.
+     */
+    slideAlignGain: 6,
+    slideAlignMinRate: 0.3,
+    slideAlignMaxRate: 2.5,
+    slideDriftScale: 0.2,
+    slideTravelSpeed: 4,
   },
   score: {
     basePerSec: 100,
