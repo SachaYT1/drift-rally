@@ -4,8 +4,9 @@
 -- of the best score: it changes only when the score improves. The 5-argument submit_result is dropped, not
 -- overloaded: with both, PostgREST could not choose between them for a call without p_car.
 --
--- Apply BEFORE deploying a client that sends p_car: an older database answers such a call with "function not
--- found", and the client keeps those finishes queued as offline until the migration lands.
+-- Apply BEFORE merging the client to master (every push to master deploys it). Without this migration the new
+-- client breaks: reading the table with best_car answers 400 (undefined column), so «Рекорды» shows its error
+-- state, and submit_result with p_car answers "function not found", so finishes stay queued as offline.
 
 alter table public.leaderboard
   add column best_car text,

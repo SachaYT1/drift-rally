@@ -2298,6 +2298,8 @@ Applying changes the production friends table. Ask the user explicitly; only on 
 
 No test rows are written to the live table. If the user says no or later, record in the final report that the migration is pending and that the client must not be released before it lands.
 
+*Code review additions:* the client must not reach master before the migration is live (every push to master deploys; without the column the friends table answers 400 and «Рекорды» breaks for everyone). Verify the column grant as the client sees it, not as the privileged MCP role: `begin; set local role anon; select best_car from public.leaderboard_ranked limit 1; rollback;`. `apply_migration` records its own version timestamp: afterwards align the history with `supabase migration repair` (or name the applied migration so `db push` does not re-apply it).
+
 ---
 
 ### Task 15: Docs, full verification, review
@@ -2350,5 +2352,5 @@ Do not push, merge or release: the user decides (release steps: memory «release
 
 ## Follow-ups (not in this plan)
 
-- Engine voice per car (E30 four, RB-style six, flat six): `sfx.ts` builds the loop voices once; switching needs a rebuild per car and new presets tuned by ear in the sound lab.
+- Engine voice per car (E30 four, RB-style six, flat six): `sfx.ts` builds the loop voices once; switching needs a rebuild per car and new presets tuned by ear in the sound lab. The gearbox revs (`audio/gearbox.ts`) and the screech thresholds (`audio/screechPresets.ts`) still read the base TUNING too; move them to the raced car's tuning with the voices.
 - Paint choice per car; per-car leaderboards; the car on the results screen.
