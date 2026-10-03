@@ -3,9 +3,11 @@
  *
  * Both are built facing +Z with +X on their left, origin at ground centre, and must match the collider
  * footprints in track/plaza.ts (footprint local (x, z) = model (Z, X)):
- * - Bicycle: anchor = bike centre, hubs at Z = +/-6.3; the collider capsule (x 3.65..8.95, r 1.4)
- *   is the ground line of the FAT front tyre (outer r 4.2, 2.6 m wide), so the visible tyre is what the
- *   car hits. Chunky toy BMX with a coral frame and mag wheels.
+ * - Bicycle: anchor = bike centre, hubs at Z = +/-6.3; only the FAT front tyre (outer r 4.2, 2.6 m wide)
+ *   collides. Its capsule (x 3.65..7.8, r 1.3 = the tyre half-width) is fitted to the tyre at car height
+ *   (<= ~1.5 m; the tyre's top half overhangs the car): the road-side end, x 7.8 + 1.3 = 9.1, is where the
+ *   tyre stands ~1.1 m tall, so the visible rubber is what the car hits. Chunky toy BMX with a coral
+ *   frame and mag wheels.
  * - Sneaker: inside its capsule (x -2..2, r 1): 6 m long, 2 m wide, 1.6 m tall, toe toward +Z.
  */
 import * as THREE from 'three';

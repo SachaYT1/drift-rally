@@ -8,8 +8,11 @@ const DT = 1 / 120;
 const track = makeCircleTrack(100);
 const L = track.length;
 
-/** Drive along the centreline at `speed` (negative = backwards) for `seconds`. */
-function drive(state: ProgressState, startS: number, speed: number, seconds: number, t0 = 0, laps = 3) {
+/**
+ * Drive along the centreline at `speed` (negative = backwards) for `seconds`. With `facing`, the car also
+ * reports its body heading: along the track direction (1) or against it (-1); without, no heading.
+ */
+function drive(state: ProgressState, startS: number, speed: number, seconds: number, t0 = 0, laps = 3, facing?: 1 | -1) {
   let s = state, along = startS, time = t0;
   const events: GameEvent[] = [];
   let lapsDone = 0;
@@ -17,7 +20,8 @@ function drive(state: ProgressState, startS: number, speed: number, seconds: num
     along += speed * DT;
     time += DT;
     const pose = track.poseAt(along, 0);
-    const r = updateProgress(s, track, { x: pose.x, z: pose.z, speed: Math.abs(speed) }, time, DT, laps);
+    const heading = facing === undefined ? undefined : pose.heading + (facing === 1 ? 0 : Math.PI);
+    const r = updateProgress(s, track, { x: pose.x, z: pose.z, speed: Math.abs(speed), heading }, time, DT, laps);
     s = r.state;
     events.push(...r.events);
     if (r.lapCompleted) lapsDone++;
@@ -231,6 +235,45 @@ describe('progress edge cases', () => {
     expect(() => respawn(frozen, track)).not.toThrow();
     expect(startGrace(frozen).graceTimer).toBe(TUNING.progress.graceTime);
     expect(frozen.graceTimer).toBe(0);
+  });
+});
+
+describe('progress: wrong-way needs the body facing against the track', () => {
+  const WW = TUNING.progress.wrongWayTime;
+  const wrongWayEvents = (events: GameEvent[]) => events.filter((e) => e.type === 'wrongWay');
+  const cruise = () => drive(createProgress(track, 3), 3, 20, 3, 0, 3, 1);
+
+  it('reversing with the body facing along the track never raises wrong-way', () => {
+    const fwd = cruise();
+    const back = drive(fwd.s, fwd.along, -6, WW + 1, fwd.time, 3, 1);
+    expect(back.s.p).toBeLessThan(fwd.s.p);
+    expect(back.s.progressSpeed).toBeLessThan(TUNING.progress.wrongWaySpeed);
+    expect(back.s.wrongWay).toBe(false);
+    expect(wrongWayEvents(back.events)).toEqual([]);
+  });
+
+  it('moving backwards with the body facing against the track raises wrong-way after the delay', () => {
+    const fwd = cruise();
+    expect(drive(fwd.s, fwd.along, -6, WW, fwd.time, 3, -1).s.wrongWay).toBe(false);
+    const back = drive(fwd.s, fwd.along, -6, WW + 0.6, fwd.time, 3, -1);
+    expect(back.s.wrongWay).toBe(true);
+    expect(wrongWayEvents(back.events)).toEqual([{ type: 'wrongWay', active: true }]);
+  });
+
+  it('turning to face along the track clears wrong-way at once, even while still rolling backwards', () => {
+    const fwd = cruise();
+    const back = drive(fwd.s, fwd.along, -6, WW + 0.6, fwd.time, 3, -1);
+    expect(back.s.wrongWay).toBe(true);
+    const turned = drive(back.s, back.along, -6, DT, back.time, 3, 1);
+    expect(turned.s.wrongWay).toBe(false);
+    expect(wrongWayEvents(turned.events)).toEqual([{ type: 'wrongWay', active: false }]);
+  });
+
+  it('reversing does not pre-charge the delay before the body turns against the track', () => {
+    const fwd = cruise();
+    const rev = drive(fwd.s, fwd.along, -6, WW + 1, fwd.time, 3, 1);
+    expect(drive(rev.s, rev.along, -6, WW * 0.5, rev.time, 3, -1).s.wrongWay).toBe(false);
+    expect(drive(rev.s, rev.along, -6, WW + 0.1, rev.time, 3, -1).s.wrongWay).toBe(true);
   });
 });
 

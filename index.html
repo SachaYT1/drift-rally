@@ -13,11 +13,39 @@
     <style>
       /* Paint the dark background before the stylesheet and fonts arrive (no white flash). */
       html, body { margin: 0; height: 100%; background: #0d0a0a; overflow: hidden; }
+      /* Static boot screen until the bundle runs: CSS only, no web fonts. showLoading() replaces it with the
+         loading screen it mirrors (same background, logo and bar placement). */
+      .dr-boot { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; overflow: hidden;
+        background: radial-gradient(120% 90% at 50% 110%, #3a1410 0%, #160c0b 45%, #0b0808 100%);
+        color: #f6f0ed; font: 500 clamp(10px, min(0.85vw + 3px, 1.6vh + 3px), 17px)/1.35 system-ui, sans-serif; }
+      .dr-boot::before { content: ''; position: absolute; inset: 0;
+        background: repeating-linear-gradient(-28deg, transparent 0 3.2em, rgb(240 87 58 / 0.035) 3.2em 3.4em); }
+      .dr-boot__inner { position: relative; width: min(30em, calc(100% - 3em)); text-align: center; }
+      .dr-boot__logo { display: inline-flex; align-items: center; gap: 0.5em; font-size: 2.3em; font-weight: 800;
+        letter-spacing: 0.04em; line-height: 1.35; white-space: nowrap; }
+      .dr-boot__logo b { color: #f0573a; font-weight: 800; }
+      .dr-boot__mark { display: inline-block; width: 1.15em; height: 0.8em; transform: skewX(-24deg);
+        background: linear-gradient(90deg, #f0573a 0 30%, transparent 30% 45%, #f0573a 45% 75%, transparent 75% 85%, #f0573a 85%); }
+      .dr-boot__bar { position: relative; height: 0.3em; margin: 2.2em 0 0.8em; border-radius: 1em; overflow: hidden; background: #2a2321; }
+      .dr-boot__bar i { position: absolute; top: 0; bottom: 0; left: 0; width: 34%; border-radius: 1em; background: #f0573a;
+        animation: dr-boot-slide 1.3s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+      @keyframes dr-boot-slide { from { transform: translateX(-105%); } to { transform: translateX(300%); } }
+      .dr-boot__row { text-align: left; font-size: 0.85em; color: #a0928d; }
+      @media (prefers-reduced-motion: reduce) { .dr-boot__bar i { animation-duration: 3s; } }
     </style>
+    <noscript><style>.dr-boot { display: none; }</style></noscript>
   </head>
   <body>
     <canvas id="game" tabindex="-1" aria-label="Drift Rally"></canvas>
-    <div id="ui"></div>
+    <div id="ui">
+      <div class="dr-boot" role="status" aria-label="Drift Rally — загрузка">
+        <div class="dr-boot__inner">
+          <span class="dr-boot__logo" aria-hidden="true"><i class="dr-boot__mark"></i>DRIFT<b>RALLY</b></span>
+          <div class="dr-boot__bar" aria-hidden="true"><i></i></div>
+          <div class="dr-boot__row" aria-hidden="true">Загрузка…</div>
+        </div>
+      </div>
+    </div>
     <noscript>
       <p style="color:#f6f0ed;font-family:sans-serif;text-align:center;margin-top:40vh">
         Для игры нужен JavaScript.

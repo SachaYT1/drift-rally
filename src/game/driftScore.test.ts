@@ -100,7 +100,9 @@ describe('drift score', () => {
     const r = updateDriftScore(s, { ...base, accruing: true, propsKnocked: 2 }, DT);
     expect(r.state.totalPoints).toBe(0);
     expect(r.state.chainPoints).toBeGreaterThan(90);
-    expect(r.events.some((e) => e.type === 'penalty')).toBe(true);
+    // Changed by the final review (penalty-flash-without-deduction): nothing banked, nothing deducted,
+    // so no penalty event (was: an event with the nominal penalty).
+    expect(r.events.some((e) => e.type === 'penalty')).toBe(false);
     s = { ...r.state, totalPoints: 150 };
     expect(updateDriftScore(s, { ...base, propsKnocked: 1 }, DT).state.totalPoints).toBe(50);
   });
@@ -213,9 +215,21 @@ describe('drift score edge cases', () => {
     expect(done.bestChain).toBe(Math.max(first, second));
   });
 
-  it('penalty event reports the nominal penalty for all knocked props', () => {
+  it('penalty event reports the points actually deducted for all knocked props', () => {
+    // Changed by the final review (penalty-flash-without-deduction): the event carries
+    // min(banked total, propPenalty * props), not the nominal penalty.
     const r = updateDriftScore({ ...createDriftScore(), totalPoints: 1000 }, { ...base, propsKnocked: 3 }, DT);
     expect(r.state.totalPoints).toBe(1000 - 3 * sc.propPenalty);
     expect(r.events).toEqual([{ type: 'penalty', points: 3 * sc.propPenalty }]);
+    const floored = 1.5 * sc.propPenalty;
+    const partial = updateDriftScore({ ...createDriftScore(), totalPoints: floored }, { ...base, propsKnocked: 2 }, DT);
+    expect(partial.state.totalPoints).toBe(0);
+    expect(partial.events).toEqual([{ type: 'penalty', points: floored }]);
+  });
+
+  it('emits no penalty event when nothing is banked to deduct', () => {
+    const r = updateDriftScore(createDriftScore(), { ...base, propsKnocked: 1 }, DT);
+    expect(r.state.totalPoints).toBe(0);
+    expect(r.events).toEqual([]);
   });
 });

@@ -47,11 +47,73 @@ function cloneForCaller(material: THREE.Material): THREE.Material {
 
 /** Where model files come from and how failures are handled. Injected so the logic is testable in node. */
 export interface AssetSource {
-  /** Loads one catalog file (path relative to the base URL) and returns its scene root. */
-  load(file: string): Promise<THREE.Object3D>;
+  /** Loads one catalog file (path relative to the base URL) and returns its scene root; `onProgress` per chunk. */
+  load(file: string, onProgress?: () => void): Promise<THREE.Object3D>;
   /** true (DEV): a missing model rejects the whole load. false (PROD): warn and skip it. */
   strict: boolean;
+  /**
+   * Stall deadline, ms (PROD): once no file has made progress or finished for this long, every load still
+   * pending fails (and is skipped like a missing model) instead of hanging the loading screen. A slow network
+   * that keeps delivering bytes never trips it. Absent: no deadline.
+   */
+  stallMs?: number;
   warn(message: string): void;
+}
+
+/** PROD stall deadline for model downloads, ms (AssetSource.stallMs). */
+export const MODEL_STALL_MS = 25_000;
+
+/**
+ * One deadline shared by all pending loads, restarted by any activity (progress or a settled load). When it
+ * expires every load still pending rejects. Late results of those requests are ignored.
+ */
+function createStallWatchdog(stallMs: number): { guard<T>(start: (onProgress: () => void) => Promise<T>): Promise<T> } {
+  const pending = new Set<(err: Error) => void>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  function expire(): void {
+    timer = undefined;
+    const err = new Error(`download stalled (no progress for ${stallMs / 1000} s)`);
+    for (const fail of [...pending]) fail(err);
+  }
+
+  /** Any download made progress or finished: restart the deadline (while something is still pending). */
+  function activity(): void {
+    clearTimeout(timer);
+    timer = pending.size > 0 ? setTimeout(expire, stallMs) : undefined;
+  }
+
+  function guard<T>(start: (onProgress: () => void) => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const settle = (): boolean => {
+        if (settled) return false;
+        settled = true;
+        pending.delete(fail);
+        activity();
+        return true;
+      };
+      const fail = (err: Error): void => {
+        if (settle()) reject(err);
+      };
+      pending.add(fail);
+      activity();
+      const onProgress = (): void => {
+        if (!settled) activity();
+      };
+      // A synchronous throw from start() becomes a rejection like any failed load.
+      new Promise<T>((started) => started(start(onProgress))).then(
+        (value) => {
+          if (settle()) resolve(value);
+        },
+        (err: unknown) => {
+          if (settle()) reject(err);
+        },
+      );
+    });
+  }
+
+  return { guard };
 }
 
 type Catalog = Record<VisualId, CatalogEntry>;
@@ -162,6 +224,9 @@ export async function createAssetLibrary(
   const materials = new Map<string, THREE.MeshLambertMaterial>();
   let done = 0;
   let failed = false;
+  const watchdog = source.stallMs !== undefined && source.stallMs > 0 ? createStallWatchdog(source.stallMs) : null;
+  const load = (file: string): Promise<THREE.Object3D> =>
+    watchdog ? watchdog.guard((onProgress) => source.load(file, onProgress)) : source.load(file);
   onProgress?.(0);
 
   await Promise.all(
@@ -169,7 +234,7 @@ export async function createAssetLibrary(
       const entry = catalog[visual];
       let template: THREE.Group | null = null;
       try {
-        const scene = await source.load(file);
+        const scene = await load(file);
         template = prepareTemplate(scene, entry.realHeight * WORLD_SCALE, entry.tint, materials);
         template.name = `${visual}-${index}`;
       } catch (err) {
@@ -206,14 +271,18 @@ export async function createAssetLibrary(
   };
 }
 
-/** Loads all catalog models from `public/models` (BASE_URL-relative). DEV: missing model throws; PROD: warns and skips. */
+/**
+ * Loads all catalog models from `public/models` (BASE_URL-relative). DEV: a missing model throws; PROD: a
+ * missing or stalled one (MODEL_STALL_MS without progress) warns and is skipped.
+ */
 export function loadAssets(onProgress?: (fraction: number) => void): Promise<AssetLibrary> {
   const loader = new GLTFLoader();
   const base = import.meta.env.BASE_URL;
   return createAssetLibrary(
     {
-      load: async (file) => (await loader.loadAsync(base + file)).scene,
+      load: async (file, onFileProgress) => (await loader.loadAsync(base + file, onFileProgress)).scene,
       strict: import.meta.env.DEV,
+      stallMs: import.meta.env.DEV ? undefined : MODEL_STALL_MS,
       warn: (message) => console.warn(message),
     },
     onProgress,

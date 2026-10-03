@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudio, MASTER_LEVEL, MAX_VOICES, type GameAudio } from './sfx';
 import { LOOP_DUCK } from './engine';
 import { DEFAULT_ENGINE_PRESET, enginePitch } from './enginePresets';
-import { FakeCtx, FakeGain, FakeNode, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
+import { FakeCtx, FakeGain, FakeNode, FakeOsc, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
 import { TUNING } from '../shared/tuning';
 import { DEG } from '../shared/math';
 import type { CarState, GameEvent, RaceResult } from '../shared/types';
@@ -149,6 +149,43 @@ describe('audio graph (fake AudioContext)', () => {
     audio.onEvent(COIN);
     audio.onEvent({ type: 'finish', result: RESULT });
     expect(ctx.nodes.length).toBe(n0);
+  });
+
+  describe('knocked cans and cups', () => {
+    const CAN: GameEvent = { type: 'propKnocked', id: 'can-1', kind: 'can', x: 0, z: 0, vx: 1, vz: 1 };
+    const CUP: GameEvent = { type: 'propKnocked', id: 'cup-1', kind: 'cup', x: 0, z: 0, vx: 1, vz: 1 };
+    const PENALTY: GameEvent = { type: 'penalty', points: 100 };
+
+    /** What `events` (one simulation step) schedule: one-shot oscillator start pitches and the loudest envelope peak. */
+    function heard(ctx: FakeCtx, audio: GameAudio, events: GameEvent[]): { pitches: number[]; peak: number } {
+      const n0 = ctx.nodes.length;
+      for (const e of events) audio.onEvent(e);
+      const fresh = ctx.nodes.slice(n0);
+      const pitches = fresh.filter((n): n is FakeOsc => n instanceof FakeOsc).map((o) => (o.frequency.calls[0] as Call).v);
+      const peak = Math.max(0, ...fresh.filter((n): n is FakeGain => n instanceof FakeGain).flatMap((g) => g.gain.calls.map((c) => c.v)));
+      return { pitches, peak };
+    }
+
+    it('every knock is heard, also with nothing banked (the session then emits no penalty)', async () => {
+      const { ctx, audio } = await started();
+      for (const knock of [CAN, CUP]) expect(heard(ctx, audio, [knock]).peak).toBeGreaterThan(0);
+      // Paper/plastic cups do not ring like a metal can.
+      expect(heard(ctx, audio, [CUP]).pitches).not.toEqual(heard(ctx, audio, [CAN]).pitches);
+    });
+
+    it('an actual deduction adds its own subtle cue, never a second knock', async () => {
+      const { ctx, audio } = await started();
+      const knock = heard(ctx, audio, [CAN]);
+      // Session order within one step: propKnocked, then the aggregated penalty.
+      const both = heard(ctx, audio, [CAN, PENALTY]);
+      expect(both.pitches.slice(0, knock.pitches.length)).toEqual(knock.pitches);
+      const cue = both.pitches.slice(knock.pitches.length);
+      expect(cue.length).toBeGreaterThan(0);
+      for (const hz of cue) expect(knock.pitches).not.toContain(hz);
+      const deduction = heard(ctx, audio, [PENALTY]);
+      expect(deduction.pitches).toEqual(cue);
+      expect(deduction.peak).toBeLessThan(knock.peak);
+    });
   });
 
   it('caps simultaneous one-shot voices and frees them on ended', async () => {

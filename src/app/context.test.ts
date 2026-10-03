@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { SMALL_BUFFER, bufferSize, pixelRatioOf, testFlagsFrom, watchPixelRatio } from './context';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SAVE, SAVE_KEY, loadSave } from '../core/save';
+import type { RaceResult, SaveData } from '../shared/types';
+import { SMALL_BUFFER, bufferSize, createApp, pixelRatioOf, testFlagsFrom, watchPixelRatio, type App, type AppDeps } from './context';
+import { recordRaceResult } from './saveResult';
 
 describe('bufferSize', () => {
   it('uses the canvas size outside small test mode', () => {
@@ -85,5 +88,213 @@ describe('watchPixelRatio', () => {
     win.moveTo(2);
     expect(onChange).toHaveBeenCalledTimes(2);
     expect(queries.every((q) => q.listeners.size === 0)).toBe(true);
+  });
+});
+
+describe('save shared between tabs', () => {
+  /**
+   * One origin's localStorage seen by several tabs, like a browser: every write fires 'storage' at the OTHER
+   * tabs only. `deliver: false` holds the events back (they are queued tasks; a tab may act before they run).
+   */
+  function browserStorage() {
+    const map = new Map<string, string>();
+    const tabs: EventTarget[] = [];
+    const held: { tab: EventTarget; key: string | null }[] = [];
+    let deliver = true;
+    const notify = (writer: EventTarget, key: string | null): void => {
+      for (const tab of tabs) {
+        if (tab === writer) continue;
+        if (deliver) tab.dispatchEvent(Object.assign(new Event('storage'), { key }));
+        else held.push({ tab, key });
+      }
+    };
+    return {
+      map,
+      tab(): { storage: Storage; events: EventTarget } {
+        const events = new EventTarget();
+        tabs.push(events);
+        const storage = {
+          getItem: (k: string) => map.get(k) ?? null,
+          setItem(k: string, v: string) {
+            map.set(k, v);
+            notify(events, k);
+          },
+          removeItem(k: string) {
+            map.delete(k);
+            notify(events, k);
+          },
+          clear() {
+            map.clear();
+            notify(events, null);
+          },
+        } as unknown as Storage;
+        return { storage, events };
+      },
+      hold() {
+        deliver = false;
+      },
+      flush() {
+        deliver = true;
+        for (const { tab, key } of held.splice(0)) tab.dispatchEvent(Object.assign(new Event('storage'), { key }));
+      },
+      stored(): SaveData {
+        return loadSave({ getItem: (k: string) => map.get(k) ?? null } as unknown as Storage);
+      },
+    };
+  }
+
+  /** createApp with inert render / audio stand-ins: only the save plumbing is real. */
+  function openTab(storage: Storage | null, events: EventTarget, qualityOverride = false, save = loadSave(storage)): App {
+    const scene = { traverse: () => undefined };
+    const deps = {
+      renderer: { compileAsync: () => Promise.resolve(), getPixelRatio: () => 1, setPixelRatio() {}, setSize() {} },
+      canvas: { clientWidth: 0, clientHeight: 0 },
+      ui: {},
+      track: {},
+      garage: { scene, camera: {}, resize() {} },
+      race: { scene, camera: {}, env: { setQuality() {} }, setAspect() {} },
+      audio: { setMuted() {} },
+      input: {},
+      test: { enabled: false, small: false },
+      save,
+      quality: 'medium',
+      qualityOverride,
+      storage,
+      storageEvents: events,
+    } as unknown as AppDeps;
+    return createApp(deps);
+  }
+
+  function race(over: Partial<RaceResult> = {}): RaceResult {
+    return {
+      totalPoints: 5000, bestChain: 2000, totalTime: 200, lapTimes: [70, 66, 68], bestLap: 66,
+      coinsPicked: 20, coinsFromDrift: 5, coinsEarned: 25, ...over,
+    };
+  }
+
+  beforeEach(() => vi.stubGlobal('window', { devicePixelRatio: 1 }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('a finish adds to the coins and records another tab saved meanwhile (event not yet delivered)', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    browser.hold();
+    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }));
+    const out = recordRaceResult(a, race({ coinsEarned: 25, totalPoints: 5000, bestLap: 66 }));
+    expect(browser.stored()).toMatchObject({ coins: 65, bestScore: 9000, bestLapMs: 64_000 });
+    expect(a.save).toMatchObject({ coins: 65, bestScore: 9000, bestLapMs: 64_000 });
+    // Records are judged against the stored save: tab B's 9000 / 64 s already beat this run.
+    expect(out.newBest).toBe(false);
+    expect(out.newBestLap).toBe(false);
+  });
+
+  it('settings writes patch only their own field of the stored save', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    browser.hold();
+    recordRaceResult(b, race({ coinsEarned: 40 }));
+    a.setMuted(true);
+    expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, muted: true });
+    a.setQuality('high');
+    expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, muted: true, quality: 'high' });
+  });
+
+  it('a quality override (test mode) is never persisted', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const a = openTab(t1.storage, t1.events, true);
+    a.setQuality('high');
+    expect(browser.map.has(SAVE_KEY)).toBe(false);
+  });
+
+  it("another tab's save reaches app.save and onSaveChanged; this tab keeps its live settings", () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    const seen: SaveData[] = [];
+    const off = a.onSaveChanged((s) => seen.push({ ...s }));
+    recordRaceResult(b, race({ coinsEarned: 40 }));
+    expect(a.save).toMatchObject({ coins: 40, bestScore: 5000, bestLapMs: 66_000 });
+    expect(seen).toEqual([a.save]);
+    // Settings are per tab while it runs (its audio / renderer state); progress is shared.
+    b.setMuted(true);
+    expect(a.save.muted).toBe(false);
+    expect(seen.length).toBe(1);
+    a.setMuted(true);
+    a.setMuted(false);
+    expect(browser.stored()).toMatchObject({ coins: 40, muted: false });
+    off();
+    recordRaceResult(b, race({ coinsEarned: 1 }));
+    expect(a.save.coins).toBe(41);
+    expect(seen.length).toBe(1);
+  });
+
+  it('a save another tab wrote while this one was loading is not missed', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    // main.ts reads the save at boot, then loads for seconds before createApp() can listen for 'storage'.
+    const bootSnapshot = loadSave(t1.storage);
+    const b = openTab(t2.storage, t2.events);
+    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }));
+    b.setMuted(true);
+    const a = openTab(t1.storage, t1.events, false, bootSnapshot);
+    expect(a.save).toMatchObject({ coins: 40, bestScore: 9000, bestLapMs: 64_000 });
+    // This tab keeps the settings it booted with (its renderer and audio already use them).
+    expect(a.save.muted).toBe(false);
+    // Its own next write builds on the stored progress, and later writes still arrive.
+    recordRaceResult(a, race({ coinsEarned: 5 }));
+    expect(browser.stored().coins).toBe(45);
+    recordRaceResult(b, race({ coinsEarned: 1 }));
+    expect(a.save.coins).toBe(46);
+  });
+
+  it('follows a save cleared in another tab and ignores unrelated keys', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    recordRaceResult(a, race({ coinsEarned: 12 }));
+    const changed = vi.fn();
+    a.onSaveChanged(changed);
+    t2.storage.setItem('other.key', '1');
+    expect(changed).not.toHaveBeenCalled();
+    t2.storage.clear();
+    expect(a.save).toEqual(DEFAULT_SAVE);
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it('with a full storage (reads work, writes fail), progress still accumulates in memory', () => {
+    const map = new Map<string, string>([[SAVE_KEY, JSON.stringify({ ...DEFAULT_SAVE, coins: 7 })]]);
+    const full = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem() {
+        throw new DOMException('quota', 'QuotaExceededError');
+      },
+    } as unknown as Storage;
+    const a = openTab(full, new EventTarget());
+    recordRaceResult(a, race({ coinsEarned: 10 }));
+    recordRaceResult(a, race({ coinsEarned: 5 }));
+    expect(a.save.coins).toBe(22);
+    // Once writes work again the stored save catches up with this tab.
+    full.setItem = (k: string, v: string) => void map.set(k, v);
+    a.setMuted(true);
+    expect(JSON.parse(map.get(SAVE_KEY) ?? '{}')).toMatchObject({ coins: 22, muted: true });
+  });
+
+  it('without storage, progress still accumulates in memory', () => {
+    const a = openTab(null, new EventTarget());
+    recordRaceResult(a, race({ coinsEarned: 10 }));
+    a.setMuted(true);
+    recordRaceResult(a, race({ coinsEarned: 5 }));
+    expect(a.save).toMatchObject({ coins: 15, bestScore: 5000, muted: true });
   });
 });

@@ -13,6 +13,8 @@ export interface InputController {
   consumeActions(): ActionFrame;
   /**
    * While racing, game keys preventDefault() and Space/arrows never reach page scrolling or focused buttons.
+   * In every mode Space/arrows never scroll the page (inside an iframe that scrolls the host page): only a
+   * focused control keeps them (Space activates a button; a form field such as the share textarea keeps both).
    * Switching mode drops unconsumed latches (e.g. Esc pressed in the garage must not pause the new race).
    */
   setRacing(on: boolean): void;
@@ -39,6 +41,24 @@ const KEY_MAP: Readonly<Record<string, Control>> = Object.freeze({
   KeyR: 'respawn',
   KeyM: 'mute',
 });
+
+/** Keys whose default action scrolls the page. */
+const SCROLL_KEYS: ReadonlySet<string> = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+/** Form fields: Space types and arrows move the caret / choice. */
+const FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
+/** Controls Space activates (arrows do nothing on them but scroll). */
+const SPACE_SELECTOR = `${FIELD_SELECTOR}, button, [role="button"]`;
+
+/** The key event's target is (inside) an element matching `selector`. Structural: no DOM globals needed. */
+function targetMatches(e: Event, selector: string): boolean {
+  const el = e.target as Partial<Element> | null;
+  return typeof el?.closest === 'function' && el.closest(selector) !== null;
+}
+
+/** A scroll key outside a race whose default the focused control needs. */
+function keepsDefault(e: Event, code: string): boolean {
+  return targetMatches(e, code === 'Space' ? SPACE_SELECTOR : FIELD_SELECTOR);
+}
 
 function isAction(control: Control): control is Action {
   return control === 'pause' || control === 'respawn' || control === 'mute';
@@ -101,7 +121,7 @@ export function createInput(target: EventTarget, onBlur?: () => void): InputCont
   const onKeyDown = (e: Event): void => {
     const key = readKey(e);
     if (key === null || key.shortcut) return;
-    if (racing) e.preventDefault();
+    if (racing || (SCROLL_KEYS.has(key.code) && !keepsDefault(e, key.code))) e.preventDefault();
     held.add(key.code);
     if (key.repeat) return;
     if (key.control === 'handbrake') handbrakeLatch = true;

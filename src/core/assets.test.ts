@@ -357,6 +357,84 @@ describe('createAssetLibrary', () => {
     expect(lib.create('tree')).not.toBeNull();
   });
 
+  describe('stalled downloads (PROD stallMs)', () => {
+    const lampFiles = CATALOG.lamp.files ?? [];
+
+    /** Lamps never answer; every other file loads after `delayMs`, reporting progress every `tickMs`. */
+    function stallingSource(stallMs: number, delayMs = 0, tickMs = 0): AssetSource & { warnings: string[] } {
+      const warnings: string[] = [];
+      return {
+        warnings,
+        strict: false,
+        stallMs,
+        warn: (m: string) => warnings.push(m),
+        load: (file: string, onProgress?: () => void) =>
+          new Promise<THREE.Object3D>((resolve) => {
+            if (lampFiles.includes(file)) return; // a request that hangs forever
+            if (tickMs > 0) {
+              const tick = setInterval(() => onProgress?.(), tickMs);
+              setTimeout(() => clearInterval(tick), delayMs);
+            }
+            setTimeout(() => resolve(fakeScene()), delayMs);
+          }),
+      };
+    }
+
+    it('skips a model whose request never answers instead of hanging the loading screen', async () => {
+      vi.useFakeTimers();
+      try {
+        const src = stallingSource(25_000);
+        const progress: number[] = [];
+        let lib: AssetLibrary | null = null;
+        void createAssetLibrary(src, (f) => progress.push(f)).then((l) => (lib = l));
+        await vi.advanceTimersByTimeAsync(24_000);
+        expect(lib).toBeNull();
+        await vi.advanceTimersByTimeAsync(1_001);
+        expect(lib).not.toBeNull();
+        expect(src.warnings.length).toBe(lampFiles.length);
+        expect(src.warnings[0]).toMatch(/lamp.*stalled/);
+        expect(lib!.create('lamp')).toBeNull();
+        expect(lib!.create('tree')).not.toBeNull();
+        expect(progress.at(-1)).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('waits for slow downloads that keep making progress (slow network, not a stall)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Every working file takes 60 s (longer than stallMs) but reports progress every 5 s.
+        const src = stallingSource(25_000, 60_000, 5_000);
+        let lib: AssetLibrary | null = null;
+        void createAssetLibrary(src).then((l) => (lib = l));
+        await vi.advanceTimersByTimeAsync(60_001);
+        expect(lib).toBeNull(); // the lamps are still pending: the stall clock starts with the last progress
+        expect(src.warnings).toEqual([]);
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect(lib).not.toBeNull();
+        expect(lib!.create('tree')).not.toBeNull();
+        expect(src.warnings.length).toBe(lampFiles.length);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('has no deadline without stallMs (DEV, tests)', async () => {
+      vi.useFakeTimers();
+      try {
+        const src = { ...stallingSource(25_000), stallMs: undefined };
+        let settled = false;
+        void createAssetLibrary(src).finally(() => (settled = true));
+        await vi.advanceTimersByTimeAsync(600_000);
+        expect(settled).toBe(false);
+        expect(src.warnings).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('does not log during a clean load', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await createAssetLibrary(fakeSource());

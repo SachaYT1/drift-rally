@@ -62,6 +62,12 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-nav__item:hover, .dr-nav__item.is-open { color: var(--dr-text); }
 .dr-nav__item[aria-current='page'] { font-family: var(--dr-head); font-size: 1.45em; letter-spacing: 0.02em; color: var(--dr-text); cursor: default; }
 .dr-nav__item[aria-current='page']::after, .dr-nav__item.is-open::after { content: ''; position: absolute; left: 50%; bottom: -0.35em; width: 0.4em; height: 0.4em; border-radius: 50%; background: var(--dr-coral); transform: translateX(-50%); }
+.dr-topbar__end { display: flex; align-items: center; gap: 1.1em; }
+.dr-sound { display: inline-flex; align-items: center; gap: 0.4em; padding: 0.4em 0.5em 0.4em 0.55em; border: 1px solid var(--dr-border); border-radius: 0.6em; background: none; transition: border-color 0.15s, color 0.15s; }
+.dr-sound:hover { border-color: var(--dr-coral); }
+.dr-sound .dr-key { font-size: 0.68em; }
+.dr-sound[aria-checked='false'] { color: var(--dr-muted); }
+.dr-sound[aria-checked='true'] .dr-sound__off, .dr-sound[aria-checked='false'] .dr-sound__on { display: none; }
 .dr-wallet { display: flex; align-items: center; gap: 0.55em; font-family: var(--dr-head); font-size: 1.3em; }
 .dr-wallet .dr-coin { width: 0.95em; height: 0.95em; }
 .dr-car { top: 7.2em; left: 1.4em; width: 18.5em; padding: 1.6em 1.6em 1.4em; }
@@ -109,6 +115,8 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-rules h3 { margin: 0 0 0.9em; font-size: 0.72em; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dr-coral); }
 .dr-keys { display: grid; grid-template-columns: auto 1fr; gap: 0.65em 0.9em; align-items: center; font-size: 0.92em; }
 .dr-keys > span:nth-child(odd) { display: flex; gap: 0.3em; }
+.dr-keys-note { margin: 1.1em 0 0; padding: 0.9em 0 0; border-top: 1px solid var(--dr-border); list-style: none; display: grid; gap: 0.55em; font-size: 0.86em; color: #ddd3cf; }
+.dr-keys-note .dr-key { margin-right: 0.35em; }
 .dr-rule-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.8em; font-size: 0.92em; color: #ddd3cf; }
 .dr-rule-list li { position: relative; padding-left: 1.2em; }
 .dr-rule-list li::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 0.45em; height: 0.45em; background: var(--dr-coral); transform: skewX(-20deg); }
@@ -154,6 +162,8 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-flash { position: absolute; left: 50%; top: 2.55em; padding: 0.2em 0.55em; border-radius: 0.45em; background: rgb(21 17 17 / 0.94); white-space: nowrap; font-family: var(--dr-head); font-size: 1.6em; opacity: 0; pointer-events: none; }
 .dr-flash--bank { color: #7be495; }
 .dr-flash--burn { color: #fff; background: var(--dr-red); }
+/* A burn whose new chain started in the same frame drops below the chain card instead of over it. */
+.dr-flash--burn.is-below { top: calc(100% + 0.3em); }
 .dr-flash--penalty { top: 0.45em; left: calc(100% + 0.5em); font-size: 0.95em; color: #fff; background: var(--dr-red); }
 .dr-hud-coins { top: 1.1em; right: 1.1em; display: flex; align-items: center; gap: 0.6em; padding: 0.7em 1.1em 0.7em 0.9em; }
 .dr-hud-coins .dr-coin { width: 1.45em; height: 1.45em; }
@@ -164,8 +174,9 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-hud-speed b { font-family: var(--dr-head); font-size: 2.6em; line-height: 1; min-width: 3ch; text-align: right; }
 .dr-hud-speed__bar { position: relative; height: 0.32em; margin-top: 0.6em; border-radius: 1em; overflow: hidden; background: #2a2321; }
 .dr-hud-speed__bar i { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); background: linear-gradient(90deg, var(--dr-gold), var(--dr-coral) 70%, #ff3d6e); }
-.dr-countdown { position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); font-family: var(--dr-head); font-size: 8em; line-height: 1; color: #fff; opacity: 0; text-shadow: 0 0.04em 0 var(--dr-coral), 0 0.06em 0.4em rgb(0 0 0 / 0.45); }
-.dr-countdown > span { display: inline-block; }
+/* The box only centres (translate); hud.ts animates the digit span, so its scale never replaces that translate. */
+.dr-countdown { position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); font-family: var(--dr-head); font-size: 8em; line-height: 1; color: #fff; white-space: nowrap; text-shadow: 0 0.04em 0 var(--dr-coral), 0 0.06em 0.4em rgb(0 0 0 / 0.45); }
+.dr-countdown > span { display: inline-block; opacity: 0; }
 .dr-countdown[data-go] { color: var(--dr-coral); font-size: 6em; text-shadow: 0 0.04em 0 #fff, 0 0.06em 0.4em rgb(0 0 0 / 0.4); }
 .dr-wrong { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); display: flex; align-items: center; gap: 0.7em; padding: 0.7em 1.4em; border-radius: 0.7em; background: var(--dr-red); color: #fff; font-family: var(--dr-head); font-size: 1.3em; opacity: 0; transition: opacity 0.2s; }
 .dr-wrong.is-on { opacity: 1; animation: dr-blink 0.9s ease-in-out infinite; }

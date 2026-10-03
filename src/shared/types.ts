@@ -68,6 +68,21 @@ export interface CarState {
   /** Accumulated wheel rolling angle, rad (visual only). */
   wheelSpin: number;
 
+  // ---- Physics-only memory (physics/), never read elsewhere. createCarState() sets 0; absent = 0, so ----
+  // ---- states built outside the simulation (tests, fixtures) stay valid without them.                 ----
+  /** Seconds a recent Space press stays armed for a flick (tuning.drift.flickWindow), counting down. */
+  flickArm?: number;
+  /**
+   * Seconds full counter-steer (steer * driftDir <= -tuning.drift.catchSteer, Space released) has been held
+   * in the current drift; at tuning.drift.catchTime the car catches the slide and the drift ends.
+   */
+  catchTimer?: number;
+  /**
+   * Seconds left of the drift-exit phase (grip mode): the body swings to the velocity heading while the
+   * direction of travel is kept. Set to tuning.drift.exitAlignTime by every drift exit, counting down.
+   */
+  exitAlign?: number;
+
   // ---- Derived values, recomputed at the end of every step ----
   /** |v|, m/s */
   speed: number;

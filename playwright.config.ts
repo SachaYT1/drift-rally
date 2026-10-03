@@ -4,9 +4,10 @@ import { defineConfig, type Project } from '@playwright/test';
  * E2E smoke test (design spec §8): builds the production bundle, serves it with `vite preview` and drives one
  * race through the `?test` hook.
  *
- * Renderer projects, picked with E2E_RENDERER=gpu|software|all (default gpu):
- *  - gpu: new headless Chromium on the real GPU (ANGLE on Metal on macOS).
- *  - software: SwiftShader, for machines and CI runners without a usable GPU (slower).
+ * Renderer projects (both always defined; pick with --project, see the npm scripts):
+ *  - gpu: new headless Chromium on the real GPU (ANGLE on Metal on macOS). `npm run e2e`.
+ *  - software: SwiftShader, for machines and CI runners without a usable GPU (slower). `npm run e2e:software`.
+ * `npm run e2e:all` (plain `playwright test`) runs both.
  */
 const PORT = 4173;
 const BASE_URL = `http://127.0.0.1:${PORT}/`;
@@ -34,10 +35,6 @@ const projects: Project[] = [
   },
 ];
 
-const renderer = process.env.E2E_RENDERER ?? 'gpu';
-const selected = projects.filter((p) => renderer === 'all' || p.name === renderer);
-if (selected.length === 0) throw new Error(`E2E_RENDERER must be gpu, software or all (got "${renderer}")`);
-
 export default defineConfig({
   testDir: 'tests/e2e',
   outputDir: 'test-results',
@@ -57,7 +54,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: selected,
+  projects,
   webServer: {
     command: `npm run build && npx vite preview --port ${PORT} --strictPort`,
     url: BASE_URL,
