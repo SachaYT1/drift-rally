@@ -5,11 +5,12 @@ import type { CarBody } from './carParts';
 import { ISKRA } from './bodies/iskra';
 import { QUADRO } from './bodies/quadro';
 import { RONIN } from './bodies/ronin';
+import { SCARAB } from './bodies/scarab';
 import { createCarState } from '../physics/car';
 import { TUNING } from '../shared/tuning';
 
 /** Every body of the line-up (Task 7 replaces this with CAR_BODIES). */
-const BODIES: Record<string, CarBody> = { iskra: ISKRA, quadro: QUADRO, ronin: RONIN };
+const BODIES: Record<string, CarBody> = { iskra: ISKRA, quadro: QUADRO, ronin: RONIN, scarab: SCARAB };
 const WHEELS = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 
 describe('car models', () => {
