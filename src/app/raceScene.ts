@@ -138,7 +138,7 @@ export function createRaceScene(
     else if (e.type === 'hit') chase.shake(TUNING.camera.shakePerImpact * e.impactSpeed);
     else if (e.type === 'bomb') {
       chase.shake(TUNING.camera.shakePerImpact * TUNING.bomb.shakeImpact);
-      car.hop();
+      rack.current.hop();
     }
   }
 
