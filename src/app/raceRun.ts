@@ -88,6 +88,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     effectsCar: renderCar,
     surface: 'road',
     pickups: session.state().pickups,
+    bombs: session.state().bombs,
     simTime: 0,
     snap: true,
   };
@@ -134,6 +135,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     frame.effectsCar = finished ? parkedCar(car, parked) : car;
     frame.surface = st.surface;
     frame.pickups = st.pickups;
+    frame.bombs = st.bombs;
     frame.simTime = simClock;
     frame.snap = snapPending;
     race.sync(frame, dt);

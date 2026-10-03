@@ -89,6 +89,7 @@ export async function compileAndPrewarm(
   };
   race.onEvent({ type: 'coin', id: -1, x: pose.x + fx * 6, z: pose.z + fz * 6 });
   race.onEvent({ type: 'hit', impactSpeed: 10, x: pose.x + fx * 3, z: pose.z + fz * 3 });
+  race.onEvent({ type: 'bomb', id: 'prewarm', x: pose.x + fx * 4, z: pose.z + fz * 4 });
   const pickups = createPickups();
   for (let i = 0; i < PREWARM.frames; i++) {
     const step = i * PREWARM.speed * PREWARM.dt;
