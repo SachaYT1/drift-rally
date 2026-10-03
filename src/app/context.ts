@@ -9,6 +9,7 @@ import type { GarageScene } from '../render/garageScene';
 import type { GameAudio } from '../audio/sfx';
 import type { InputController } from '../core/input';
 import { writeSave } from '../core/save';
+import { isQualityLevel, pixelRatioFor } from '../core/quality';
 import type { RaceScene } from './raceScene';
 
 export type ScreenName = 'loading' | 'garage' | 'race' | 'results';
@@ -16,12 +17,28 @@ export type ScreenName = 'loading' | 'garage' | 'race' | 'results';
 export interface TestFlags {
   /** `?test`: the test hook drives the simulation; requestAnimationFrame only renders. */
   enabled: boolean;
-  /** `?test&small`: quality low, pixel ratio 1, drawing buffer at most SMALL_BUFFER. */
+  /**
+   * The test-mode render contract (plan Task 16, design spec §8): quality low, pixel ratio 1, drawing buffer
+   * at most SMALL_BUFFER. On by default with `?test`; `&full` or `&quality=<level>` opt out.
+   */
   small: boolean;
 }
 
-/** Drawing-buffer bound in `?test&small` mode, CSS px (the canvas still fills the window). */
+/** Drawing-buffer bound of the test-mode render contract, CSS px (the canvas still fills the window). */
 export const SMALL_BUFFER = { width: 640, height: 360 } as const;
+
+/**
+ * Test flags from the URL. Plain `?test` (and `?test&small`) applies the render contract. Full-size opt-outs
+ * for screenshots and FPS runs: `?test&full` keeps the saved / auto quality, `?test&quality=<level>` forces a
+ * level without persisting it. Outside test mode the URL never changes the quality.
+ */
+export function testFlagsFrom(params: URLSearchParams): { test: TestFlags; quality: QualityLevel | null } {
+  const enabled = params.has('test');
+  const urlQuality = params.get('quality');
+  const wanted = enabled && isQualityLevel(urlQuality) ? urlQuality : null;
+  const small = enabled && !params.has('full') && wanted === null;
+  return { test: { enabled, small }, quality: small ? 'low' : wanted };
+}
 
 export interface App {
   readonly renderer: THREE.WebGLRenderer;
@@ -51,7 +68,7 @@ export interface App {
   onFrame(cb: () => void): () => void;
   /** Frames per second over the last full second (0 until measured). */
   readonly fps: number;
-  /** Recompute the drawing-buffer size and camera aspects from the canvas size. */
+  /** Recompute the pixel ratio, drawing-buffer size and camera aspects (canvas size or devicePixelRatio changed). */
   resize(): void;
 }
 
@@ -78,6 +95,30 @@ export function bufferSize(w: number, h: number, small: boolean): { width: numbe
   return { width: Math.max(1, Math.round(w * k)), height: Math.max(1, Math.round(h * k)) };
 }
 
+/** Renderer pixel ratio: the quality cap of devicePixelRatio, always 1 under the test render contract. */
+export function pixelRatioOf(quality: QualityLevel, devicePixelRatio: number, small: boolean): number {
+  return small ? 1 : pixelRatioFor(quality, devicePixelRatio);
+}
+
+/**
+ * Calls `onChange` whenever devicePixelRatio changes (window moved to a monitor with another DPR). The
+ * ResizeObserver misses that when the canvas keeps its CSS size. Returns the function that stops watching.
+ */
+export function watchPixelRatio(win: Pick<Window, 'devicePixelRatio' | 'matchMedia'>, onChange: () => void): () => void {
+  let query: MediaQueryList | null = null;
+  const fire = (): void => {
+    arm();
+    onChange();
+  };
+  function arm(): void {
+    query?.removeEventListener('change', fire);
+    query = win.matchMedia(`(resolution: ${win.devicePixelRatio}dppx)`);
+    query.addEventListener('change', fire);
+  }
+  arm();
+  return () => query?.removeEventListener('change', fire);
+}
+
 /** Make three re-evaluate the shader program of every material under `root` on its next use. */
 function refreshMaterials(root: THREE.Object3D): void {
   root.traverse((o) => {
@@ -94,6 +135,8 @@ export function createApp(d: AppDeps): App {
   let fps = 0;
   let frames = 0;
   let windowStart = -1;
+  /** devicePixelRatio of the last resize(). */
+  let appliedDpr = 0;
 
   d.audio.setMuted(save.muted);
 
@@ -138,6 +181,9 @@ export function createApp(d: AppDeps): App {
     screen: 'loading',
     redraw: null,
     frameDone() {
+      // Media-query change events miss some devicePixelRatio changes (DevTools / CDP device emulation): a
+      // property read per frame catches those too. watchPixelRatio() covers the paused screens.
+      if (window.devicePixelRatio !== appliedDpr) app.resize();
       const now = performance.now();
       if (windowStart < 0) windowStart = now;
       frames++;
@@ -156,9 +202,13 @@ export function createApp(d: AppDeps): App {
       return fps;
     },
     resize() {
+      appliedDpr = window.devicePixelRatio;
       const w = d.canvas.clientWidth;
       const h = d.canvas.clientHeight;
       if (!(w > 0 && h > 0)) return;
+      // Re-read devicePixelRatio every time: it changes when the window moves to another monitor.
+      const ratio = pixelRatioOf(quality, appliedDpr, d.test.small);
+      if (d.renderer.getPixelRatio() !== ratio) d.renderer.setPixelRatio(ratio);
       const size = bufferSize(w, h, d.test.small);
       d.renderer.setSize(size.width, size.height, false);
       d.garage.resize(w, h);

@@ -1,6 +1,8 @@
 /**
  * `?test` automation hook (plan Task 16/17): window.__game drives races deterministically. In test mode the
  * rAF loop never steps the simulation on its own (it only renders) unless realtime() hands it a driver.
+ * Plain `?test` also applies the render contract (quality low, pixel ratio 1, buffer <= 640x360);
+ * `&full` / `&quality=<level>` keep the window-sized buffer (see testFlagsFrom in context.ts).
  */
 import { NEUTRAL_INPUT, type DriveMode, type InputFrame } from '../shared/types';
 import { TUNING } from '../shared/tuning';

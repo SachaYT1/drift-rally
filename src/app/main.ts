@@ -6,14 +6,14 @@
 import type * as THREE from 'three';
 import type { QualityLevel, SaveData } from '../shared/types';
 import { loadSave } from '../core/save';
-import { detectQuality, isQualityLevel } from '../core/quality';
+import { detectQuality } from '../core/quality';
 import { createInput } from '../core/input';
 import { createAudio } from '../audio/sfx';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { applyRendererQuality, createRenderer } from '../render/environment';
 import { isProbablyMobile, showFatal, showLoading } from '../ui/screens';
-import { createApp, type App, type TestFlags } from './context';
+import { createApp, testFlagsFrom, watchPixelRatio, type App } from './context';
 import { compileAndPrewarm, loadScenes } from './loading';
 import { enterGarage, type GarageScreen } from './garageScreen';
 import { enterRace, type RaceScreen } from './raceScreen';
@@ -47,8 +47,8 @@ function rendererName(renderer: THREE.WebGLRenderer): string | null {
 
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
-  const testMode = params.has('test');
-  const test: TestFlags = { enabled: testMode, small: testMode && params.has('small') };
+  // `?test`: render contract (low, pixel ratio 1, <= 640x360) unless `&full` / `&quality=` opt out.
+  const { test, quality: forced } = testFlagsFrom(params);
   const canvas = byId<HTMLCanvasElement>('game');
   const ui = byId('ui');
 
@@ -91,8 +91,6 @@ async function boot(): Promise<void> {
   }
 
   const save = loadSave();
-  const urlQuality = test.enabled ? params.get('quality') : null;
-  const forced: QualityLevel | null = test.small ? 'low' : isQualityLevel(urlQuality) ? urlQuality : null;
   let quality: QualityLevel = forced ?? save.quality ?? 'medium';
   let renderer: THREE.WebGLRenderer;
   try {
@@ -140,6 +138,7 @@ async function boot(): Promise<void> {
   const appRef = app;
   appRef.resize();
   new ResizeObserver(() => appRef.resize()).observe(canvas);
+  watchPixelRatio(window, () => appRef.resize());
   await compileAndPrewarm(renderer, scenes, track, (f) => loading.setProgress(f));
   if (halted) return;
 
