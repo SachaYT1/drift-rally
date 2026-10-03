@@ -37,6 +37,8 @@ export interface GameTestState {
   paused: boolean;
   /** The car of the running race. */
   car: CarId | null;
+  /** Top speed of the running race's physics (the car's own tuning), m/s. */
+  maxSpeed: number | null;
   fps?: number;
   /**
    * Ghost bots of the run in roster order, points as the HUD ranks them (banked plus the running chain: the
@@ -151,6 +153,7 @@ export function installTestHook(target: HookTarget): GameTestHook {
         time: st?.time ?? 0,
         paused: r?.paused ?? false,
         car: r?.car ?? null,
+        maxSpeed: r?.session.tuning.car.maxSpeed ?? null,
         fps: a?.fps,
         bots: (r?.ghosts?.field.bots ?? []).map((b) => {
           const bs = b.session.state();

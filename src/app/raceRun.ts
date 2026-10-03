@@ -46,7 +46,7 @@ export interface RaceRun {
   readonly ghosts: GhostRun | null;
   /** The car of this run. */
   readonly car: CarId;
-  /** The physics of this run: TUNING with the car's overrides. */
+  /** The physics of this run: TUNING with the car's overrides (the session's own tuning). */
   readonly tuning: Tuning;
   readonly paused: boolean;
   /** The session reported its finish (results may still be pending). */
@@ -299,7 +299,9 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     session,
     ghosts,
     car,
-    tuning,
+    get tuning() {
+      return session.tuning;
+    },
     get paused() {
       return paused;
     },

@@ -36,7 +36,8 @@ test('buy «Квадро» in the garage and race it', async ({ page }, info) =>
 
   await test.step('race it', async () => {
     await page.evaluate(() => window.__game!.startRace());
-    expect(await page.evaluate(() => window.__game!.state().car)).toBe('quadro');
+    // The car label and the physics the session actually runs with (Квадро's own top speed).
+    expect(await page.evaluate(() => window.__game!.state())).toMatchObject({ car: 'quadro', maxSpeed: 38 });
     await page.evaluate((n) => window.__game!.autopilot(n), 8 * HZ);
     const st: GameTestState = await page.evaluate(() => window.__game!.state());
     expect(st.phase).toBe('racing');
