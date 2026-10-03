@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SAVE, SAVE_KEY, loadSave } from '../core/save';
+import { DEFAULT_SAVE, GARAGE_KEY, SAVE_KEY, loadSave } from '../core/save';
 import type { RaceResult, SaveData } from '../shared/types';
 import { SMALL_BUFFER, bufferSize, createApp, pixelRatioOf, testFlagsFrom, watchPixelRatio, type App, type AppDeps } from './context';
 import { recordRaceResult } from './saveResult';
-import { purchaseCar } from './carShop';
+import { purchaseCar, selectCar } from './carShop';
 
 describe('bufferSize', () => {
   it('uses the canvas size outside small test mode', () => {
@@ -234,6 +234,31 @@ describe('save shared between tabs', () => {
     purchaseCar(b, 'quadro');
     expect(a.save).toMatchObject({ coins: 100, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' });
     expect(seen.at(-1)).toEqual(['iskra', 'quadro']);
+  });
+
+  it('a car selected in another tab (coins unchanged) reaches this tab and its save listeners', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    recordRaceResult(b, race({ coinsEarned: 400 }), 'iskra');
+    purchaseCar(b, 'quadro');
+    b.updateSave((s) => selectCar(s, 'iskra'));
+    const seen: string[] = [];
+    a.onSaveChanged((s) => seen.push(s.selectedCar));
+    b.updateSave((s) => selectCar(s, 'quadro'));
+    expect(a.save).toMatchObject({ coins: 100, selectedCar: 'quadro' });
+    expect(seen).toEqual(['quadro']);
+  });
+
+  it('follows a garage written alone by another tab', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    t2.storage.setItem(GARAGE_KEY, JSON.stringify({ version: 1, ownedCars: ['iskra', 'ronin'], selectedCar: 'ronin' }));
+    expect(a.save).toMatchObject({ ownedCars: ['iskra', 'ronin'], selectedCar: 'ronin' });
   });
 
   it('a quality override (test mode) is never persisted', () => {

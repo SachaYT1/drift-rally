@@ -9,7 +9,7 @@ import type { GarageScene } from '../render/garageScene';
 import type { GameAudio } from '../audio/sfx';
 import type { InputController } from '../core/input';
 import type { Leaderboard } from './leaderboard';
-import { SAVE_KEY, readSave, updateSave } from '../core/save';
+import { GARAGE_KEY, SAVE_KEY, readSave, updateSave } from '../core/save';
 import { isQualityLevel, pixelRatioFor } from '../core/quality';
 import type { RaceScene } from './raceScene';
 
@@ -198,10 +198,10 @@ export function createApp(d: AppDeps): App {
   const atStart = readSave(d.storage);
   if (atStart) adopt(atStart);
 
-  // Another tab saved (a finished race, a setting) or cleared the storage: follow its progress.
+  // Another tab saved (a finished race, a setting, a car) or cleared the storage: follow its progress.
   (d.storageEvents ?? window).addEventListener('storage', (e) => {
     const key = 'key' in e ? e.key : null;
-    if (key !== null && key !== SAVE_KEY) return;
+    if (key !== null && key !== SAVE_KEY && key !== GARAGE_KEY) return;
     const stored = readSave(d.storage);
     if (stored) adopt(stored);
   });

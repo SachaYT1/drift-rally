@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { GameTestState } from '../../src/app/testHook';
 
 const SAVE_KEY = 'driftRally.save.v1';
+const GARAGE_KEY = 'driftRally.garage.v1';
 /** TUNING.race.physicsHz. */
 const HZ = 120;
 
@@ -10,12 +11,10 @@ test('buy «Квадро» in the garage and race it', async ({ page }, info) =>
   await page.addInitScript(
     ([key]) => {
       if (localStorage.getItem(key) !== null) return;
+      // The garage record (cars) is absent: the game starts with the free car only.
       localStorage.setItem(
         key,
-        JSON.stringify({
-          version: 1, coins: 500, bestScore: 0, bestLapMs: null, quality: null, muted: true,
-          ownedCars: ['iskra'], selectedCar: 'iskra', bestScoreCar: null,
-        }),
+        JSON.stringify({ version: 1, coins: 500, bestScore: 0, bestLapMs: null, quality: null, muted: true }),
       );
     },
     [SAVE_KEY],
@@ -30,8 +29,9 @@ test('buy «Квадро» in the garage and race it', async ({ page }, info) =>
     await page.locator('.dr-cta').click();
     await page.locator('[data-confirm-buy]').click();
     await expect(page.locator('.dr-cta')).toContainText('В ЗАЕЗД', { useInnerText: true });
-    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null'), SAVE_KEY);
-    expect(saved).toMatchObject({ coins: 200, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' });
+    const read = (key: string): Promise<unknown> => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null'), key);
+    expect(await read(SAVE_KEY)).toMatchObject({ coins: 200 });
+    expect(await read(GARAGE_KEY)).toEqual({ version: 1, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' });
   });
 
   await test.step('race it', async () => {

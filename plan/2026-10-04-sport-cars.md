@@ -31,6 +31,7 @@
 
   A full autopilot race earns ~100 coins, so the prices mean ~3–6, then ~6–9, then ~11–20 more races.
 - **Save:** stays `version: 1`; the new fields are additive with defaults. Bumping the version would make an open old tab read "other version" → defaults and overwrite the coins.
+  - *Code review fix:* an old (v0.4.0) tab still rewrites `SAVE_KEY` with only the fields it knows, so cars kept there would be stripped and a purchase lost. The garage (`ownedCars`, `selectedCar`) therefore lives under its own key `driftRally.garage.v1`, which old versions never write; `bestScoreCar` stays next to the score (stripped = «unknown car»).
 - **Friends table:** one table; each player's row shows the car of their best score (`best_car` column, `p_car` RPC argument). The migration is applied to the live project **only after the user confirms** (Task 14), and before the client ships.
 - **Garage UX:** browse on the podium (‹ › buttons, ← → keys); the card shows the browsed car; CTA = «В заезд» for an owned car, «Купить · ● price» (disabled with «Не хватает N монет» when short) for a locked one; buying needs a confirmation dialog whose default focus is «Отмена». Enter never buys and never starts a race on a locked car. Browsing to an owned car selects it for the next race; buying selects the bought car.
 - **Out of scope (follow-ups):** per-car engine voices (needs listening in the sound lab), paint choice, per-car leaderboards, the car on the results screen.

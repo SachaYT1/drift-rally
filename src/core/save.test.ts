@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SAVE, SAVE_KEY, loadSave, readSave, updateSave, writeSave } from './save';
+import { DEFAULT_SAVE, GARAGE_KEY, SAVE_KEY, loadSave, readSave, updateSave, writeSave } from './save';
 
 class MemStorage {
   map = new Map<string, string>();
@@ -65,8 +65,9 @@ describe('save edge cases', () => {
     const withExtra = { ...data, debug: { huge: true } };
     expect(writeSave(withExtra, s)).toBe(true);
     expect(Object.keys(JSON.parse(s.getItem(SAVE_KEY) ?? '{}')).sort()).toEqual(
-      ['bestLapMs', 'bestScore', 'bestScoreCar', 'coins', 'ghosts', 'muted', 'ownedCars', 'quality', 'selectedCar', 'version'],
+      ['bestLapMs', 'bestScore', 'bestScoreCar', 'coins', 'ghosts', 'muted', 'quality', 'version'],
     );
+    expect(Object.keys(JSON.parse(s.getItem(GARAGE_KEY) ?? '{}')).sort()).toEqual(['ownedCars', 'selectedCar', 'version']);
   });
   it('write returns false without storage', () => expect(writeSave(data, null)).toBe(false));
   it('ghost bots default to on, also for saves written before the setting existed', () => {
@@ -171,18 +172,37 @@ describe('save: cars', () => {
     expect(loadSave(s)).toMatchObject({ ownedCars: ['iskra'], selectedCar: 'iskra', bestScoreCar: null });
   });
 
+  const garage = (g: Record<string, unknown>) => JSON.stringify({ version: 1, ...g });
+
   it('keeps known owned cars in line-up order, always with «Искра»', () => {
-    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['scarab', 'bmw', 'quadro', 'quadro'] }));
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify(base));
+    s.setItem(GARAGE_KEY, garage({ ownedCars: ['scarab', 'bmw', 'quadro', 'quadro'] }));
     expect(loadSave(s).ownedCars).toEqual(['iskra', 'quadro', 'scarab']);
   });
 
   it('selects «Искра» when the stored car is unknown or not owned', () => {
     for (const selectedCar of ['ronin', 'bmw', 7]) {
-      const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['quadro'], selectedCar }));
+      const s = mem(); s.setItem(SAVE_KEY, JSON.stringify(base));
+      s.setItem(GARAGE_KEY, garage({ ownedCars: ['quadro'], selectedCar }));
       expect(loadSave(s).selectedCar).toBe('iskra');
     }
-    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['quadro'], selectedCar: 'quadro' }));
+    const s = mem(); s.setItem(GARAGE_KEY, garage({ ownedCars: ['quadro'], selectedCar: 'quadro' }));
     expect(loadSave(s).selectedCar).toBe('quadro');
+  });
+
+  it('reads a corrupt or other-version garage as «Искра» only, keeping the rest of the save', () => {
+    for (const raw of ['{oops', 'null', JSON.stringify({ version: 2, ownedCars: ['ronin'], selectedCar: 'ronin' })]) {
+      const s = mem(); s.setItem(SAVE_KEY, JSON.stringify(base)); s.setItem(GARAGE_KEY, raw);
+      expect(loadSave(s)).toMatchObject({ coins: 50, ownedCars: ['iskra'], selectedCar: 'iskra' });
+    }
+  });
+
+  it('keeps the cars when an older game version rewrites the main record (it only knows the old fields)', () => {
+    const s = mem();
+    writeSave({ ...DEFAULT_SAVE, coins: 200, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' }, s);
+    // v0.4.0 and earlier: read-modify-write of SAVE_KEY with only the fields it knows.
+    s.setItem(SAVE_KEY, JSON.stringify({ version: 1, coins: 260, bestScore: 900, bestLapMs: null, quality: null, muted: true }));
+    expect(loadSave(s)).toMatchObject({ coins: 260, muted: true, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' });
   });
 
   it('keeps a known record car and drops an unknown one', () => {
