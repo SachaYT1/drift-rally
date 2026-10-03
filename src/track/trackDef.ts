@@ -71,6 +71,13 @@ export interface LightPropDef {
   lateral: number;
 }
 
+/** Bomb on the road: blows up when the car touches it (burns the chain, throws the car); back every lap. */
+export interface BombDef {
+  id: string;
+  s: number;
+  lateral: number;
+}
+
 /** A row of coins along the track starting at `s`, `spacing` metres apart. */
 export interface CoinRowDef {
   s: number;
@@ -104,6 +111,7 @@ export interface TrackDef {
   startS: number;
   heavy: HeavyObstacleDef[];
   light: LightPropDef[];
+  bombs: BombDef[];
   coins: CoinRowDef[];
   decor: DecorDef[];
   /** Plaza ground extents in map units: [minX, minZ, maxX, maxZ]. */

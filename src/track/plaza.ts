@@ -148,6 +148,7 @@ export const PLAZA: TrackDef = {
   startS: 50,
   heavy: HEAVY,
   light: LIGHT,
+  bombs: [],
   coins: COINS,
   decor: DECOR,
   ground: [-200, -260, 860, 700],

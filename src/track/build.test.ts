@@ -188,6 +188,7 @@ const CIRCLE: TrackDef = {
     { id: 'c', kind: 'can', s: 50, lateral: 2 },
     { id: 'u', kind: 'cup', s: 60, lateral: -2 },
   ],
+  bombs: [{ id: 'b', s: 150, lateral: 1.5 }],
   coins: [
     { s: 10, lateral: 1, count: 3, spacing: 5 },
     { s: 200, lateral: -1, count: 2, spacing: 4 },
@@ -294,6 +295,11 @@ describe('track build (synthetic circle)', () => {
     expect(circle.spawnPose).toEqual(spawn);
     expect(circle.decor[0]).toMatchObject({ x: 0, z: 0 });
     expect(circle.ground).toEqual({ minX: -200, minZ: -190, maxX: 200, maxZ: 190 });
+  });
+
+  it('places bombs at (s, lateral) with the tuning radius', () => {
+    const p = circle.poseAt(150, 1.5);
+    expect(circle.bombs).toEqual([{ id: 'b', x: p.x, z: p.z, r: TUNING.bomb.radius }]);
   });
 
   it('builds closed inner (left) and outer barrier polylines at the barrier offset', () => {
