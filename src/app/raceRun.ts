@@ -110,7 +110,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
 
   race.setCar(car);
   race.reset();
-  const hud = createHud(ui, { onPause: () => pause('player') });
+  const hud = createHud(ui, { onPause: () => pause('player'), maxSpeed: tuning.car.maxSpeed });
   const pauseMenu = createPauseMenu(ui, {
     onResume: () => resume(),
     onRestart: () => hooks.onRestart(),

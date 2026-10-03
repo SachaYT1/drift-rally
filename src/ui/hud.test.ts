@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHud, type Hud, type HudView } from './hud';
+import { TUNING } from '../shared/tuning';
 import { MINUS } from './format';
 import { fakeAnimations, installDom, type FakeAnimation } from './domTestEnv';
 
@@ -177,5 +178,25 @@ describe('HUD (jsdom)', () => {
       expect(root.querySelectorAll('.dr-standings li')).toHaveLength(2);
       expect(q('.dr-standings li.is-player .dr-standings__name').textContent).toBe('Ты');
     });
+  });
+});
+
+describe('HUD speed bar (jsdom)', () => {
+  const VIEW: HudView = {
+    lap: 1, laps: 3, time: 0, bestLap: null, coins: 0, speed: 0,
+    chainPoints: 0, multiplier: 1, chainPhase: 'idle', totalPoints: 0, wrongWay: false,
+  };
+  const bar = (root: HTMLElement): string => root.querySelector<HTMLElement>('.dr-hud-speed__bar i')!.style.transform;
+
+  it('fills to the car top speed it was given, else to TUNING.car.maxSpeed', () => {
+    const root = document.createElement('div');
+    const own = createHud(root, { onPause: () => {}, maxSpeed: 50 });
+    own.update({ ...VIEW, speed: 25 });
+    expect(bar(root)).toBe('scaleX(0.500)');
+    own.destroy();
+    const plain = createHud(root, { onPause: () => {} });
+    plain.update({ ...VIEW, speed: 20 });
+    expect(bar(root)).toBe(`scaleX(${(20 / TUNING.car.maxSpeed).toFixed(3)})`);
+    plain.destroy();
   });
 });
