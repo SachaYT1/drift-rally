@@ -39,7 +39,10 @@ function ringUpload(attr: THREE.BufferAttribute, perQuad: number): { mark(start:
 
 /** Skid strip of one wheel: last point, its left/right edge, mark alpha; `edged` false until a segment sets the direction. */
 export type Trail = { active: boolean; edged: boolean; x: number; z: number; lx: number; lz: number; rx: number; rz: number; alpha: number };
-/** Quad q = vertices 4q..4q+3 (start left, start right, end right, end left) as triangles 012, 023. */
+/**
+ * Quad q = vertices 4q..4q+3 (start left, start right, end right, end left) as triangles 012, 023: counter-
+ * clockwise seen from above for any travel direction, so the front face points up.
+ */
 const QUAD = [0, 1, 2, 0, 2, 3];
 
 export class SkidMarks {
@@ -61,8 +64,11 @@ export class SkidMarks {
     geo.setAttribute('color', this.col);
     geo.setIndex(new THREE.BufferAttribute(index, 1));
     geo.setDrawRange(0, 0);
+    // FrontSide: the quads face +y (extend() winds them counter-clockwise seen from above). A transparent
+    // DoubleSide material would be drawn twice per frame by three (back, then front), re-resolving its shader
+    // program each time.
     const material = new THREE.MeshBasicMaterial({
-      color: SKID_COLOR, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      color: SKID_COLOR, vertexColors: true, transparent: true, depthWrite: false, side: THREE.FrontSide,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
     });
     this.mesh = Object.assign(new THREE.Mesh(geo, material), { name: 'fx-skidmarks', frustumCulled: false, renderOrder: -2 });
