@@ -70,7 +70,7 @@ function rulesHtml(): string {
           <li class="dr-eyebrow">В заносе</li>
           <li>${keyHtml('W')} держит занос, отпустите газ — выход</li>
           <li>${keyHtml('A')}${keyHtml('D')} внутрь — круче, наружу — прямее</li>
-          <li>Полный контрруль ~${decimalRu(TUNING.drift.catchTime)} с — поймать занос и выровняться</li>
+          <li>Полный контрруль — машина выпрямится и поймает занос</li>
           <li>${keyHtml('S')} тормоз и выход из заноса</li>
           <li>${keyHtml('Пробел')} + обратный руль — перекладка</li>
         </ul>

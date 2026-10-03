@@ -47,7 +47,8 @@ describe('garage UI (jsdom)', () => {
   describe('rules modal', () => {
     const driftNotes = (modal: HTMLElement): string[] =>
       [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
-    const catchNote = (seconds: string): string => `Полный контрруль ~${seconds} с — поймать занос и выровняться`;
+    /** The catch counts from the wheel reaching full lock (de4fbc7), so the copy quotes no time. */
+    const CATCH_NOTE = 'Полный контрруль — машина выпрямится и поймает занос';
 
     it('explains the drift controls of scheme A (design spec §2.3) and what burns the chain', () => {
       mount();
@@ -56,7 +57,7 @@ describe('garage UI (jsdom)', () => {
         'В заносе',
         'W держит занос, отпустите газ — выход',
         'AD внутрь — круче, наружу — прямее',
-        catchNote(String(TUNING.drift.catchTime).replace('.', ',')),
+        CATCH_NOTE,
         'S тормоз и выход из заноса',
         'Пробел + обратный руль — перекладка',
       ]);
@@ -66,17 +67,14 @@ describe('garage UI (jsdom)', () => {
       expect(text).not.toContain('Руль внутрь');
     });
 
-    it.each([
-      [0.45, '0,45'],
-      [0.5, '0,5'],
-      [0.1 + 0.2, '0,3'], // float noise never reaches the player
-      [1, '1'],
-    ])('shows the catch time TUNING.drift.catchTime = %s as «~%s с»', (seconds, shown) => {
+    it.each([0.3, 0.45, 1])('quotes no catch time (TUNING.drift.catchTime = %s): it counts from the wheel at full lock', (seconds) => {
       const saved = TUNING.drift.catchTime;
       TUNING.drift.catchTime = seconds;
       try {
         mount();
-        expect(driftNotes(openRules())).toContain(catchNote(shown));
+        const notes = driftNotes(openRules());
+        expect(notes).toContain(CATCH_NOTE);
+        expect(notes.join(' ')).not.toMatch(/\d/);
       } finally {
         TUNING.drift.catchTime = saved;
       }
