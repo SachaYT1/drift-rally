@@ -44,11 +44,14 @@ describe('plaza map data', () => {
     expect(PLAZA.heavy.find((h) => h.id === 'bench')?.occluder).toBe(true);
   });
 
-  it('bicycle front wheel crosses the right barrier and protrudes ~2 m onto the road', () => {
+  it('bicycle front wheel crosses the right barrier and protrudes onto the road edge', () => {
+    // Changed by the final review (bicycle-collider-beyond-tyre): the capsule is fitted to the visible
+    // tyre at car height, ~0.8 m onto the road (was ~2 m, the tyre's full ground-plane silhouette, which
+    // at car height left the collider up to ~1 m beyond the visible rubber).
     const [lo, hi] = lateralExtent('bicycle');
     expect(lo).toBeLessThanOrEqual(-B);
-    expect(hi).toBeGreaterThan(-TUNING.track.roadHalfWidth + 1.5);
-    expect(hi).toBeLessThan(-TUNING.track.roadHalfWidth + 2.5);
+    expect(hi).toBeGreaterThan(-TUNING.track.roadHalfWidth + 0.4);
+    expect(hi).toBeLessThan(-TUNING.track.roadHalfWidth + 1.1);
   });
 
   it('sneaker lies on the inside of the right-hand kink, reaching ~2.5 m onto the road', () => {

@@ -28,13 +28,25 @@ Garage → «В ЗАЕЗД» → loading (if needed) → countdown 3-2-1-GO → 
 
 Game keys call `preventDefault()` while racing. UI buttons are blurred when a race starts; `e.repeat` is ignored for actions.
 
-### 2.3 Assisted arcade drift
+### 2.3 Assisted arcade drift (control scheme A, approved by the player on 2026-10-03)
 - Space at speed ≥ 8 m/s with steer held kicks the car into a drift in the steer direction.
-- While drifting, the car holds the drift itself. The player controls the **path curvature** with A/D relative to the drift direction: steering into the drift = tighter path and wider angle; neutral = medium; counter-steer = straighter path and smaller angle. Body yaw follows (velocity heading + target slip) through a rate-limited filter, so it cannot oscillate or spin.
-- Flick (direction change in the slalom / bicycle snake): strong opposite steer (steer·driftDir ≤ −0.6) + Space press → drift direction flips with a rate-limited body swing; the car stays in drift mode, so the chain stays alive.
-- Drift continues while throttle or Space is held. With neither for 0.25 s → exit; lateral grip blends back to normal over 0.3 s (no jolt).
+- While drifting, the car holds the drift itself. The player controls the **path curvature** with A/D relative to the drift direction:
+
+| Input in a drift | Result |
+|---|---|
+| W held | the drift holds |
+| A/D into the turn | tighter arc, wider angle |
+| Counter-steer | smaller angle, straighter path; FULL counter-steer ≈ zero curvature (drive straight while still sliding) |
+| Counter-steer held ~0.3 s (full) | the car "catches" the slide: the drift ends and grip returns |
+| S (brake) | scrubs speed and ends the drift after ~0.15 s |
+| Release W and Space for 0.25 s | the drift ends |
+| Space held | tighter arc + a little more angle (handbrake) |
+
+- **Every exit keeps the direction of travel:** the nose swings back to the velocity heading (rate-limited) instead of the velocity snapping toward the nose, so the car never darts toward the inside of the corner. Lateral grip still blends back smoothly over ~0.3 s.
+- Flick (direction change in the slalom / bicycle snake): strong opposite steer (steer·driftDir ≤ −0.6) + a Space press, in either order within ~120 ms (or Space held while the steer crosses to the opposite side) → drift direction flips with a rate-limited body swing; the car stays in drift mode, so the chain stays alive.
 - No drift logic below 8 m/s or when moving backwards.
-- Heavy hit → drift ends, 0.4 s recovery (body eases toward velocity heading).
+- Heavy hit → drift ends, 0.4 s recovery (body eases toward velocity heading); throttle works immediately after the bounce (no dead throttle).
+- The rules modal and the start hint explain: «S — выход из заноса», «контрруль — выровняться», «отпустите газ — машина выравнивается».
 
 ### 2.4 Scoring
 - Points accrue only when ALL hold: drifting, |slip| ≥ 10°, surface is road or curb, speed > 8 m/s, unwrapped progress ≥ frontier − 5 m, forward progress speed ds/dt > 2 m/s.

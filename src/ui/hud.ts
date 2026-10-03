@@ -5,7 +5,7 @@
 import type { GameEvent } from '../shared/types';
 import { TUNING } from '../shared/tuning';
 import { formatKmh, formatLap, formatPoints, formatTime, MINUS } from './format';
-import { COIN_HTML, createLayer, keyHtml, play, qs } from './screens';
+import { COIN_HTML, createLayer, fadeOut, keyHtml, play, playing, qs } from './screens';
 
 export interface HudView {
   lap: number;
@@ -62,6 +62,7 @@ const COIN_UP: Keyframe[] = [
   { opacity: 1, transform: 'translateY(0.3em)', offset: 0.2 },
   { opacity: 0, transform: 'translateY(1.3em)' },
 ];
+/** Played on the digit span: the box keeps its translate(-50%, -50%) centring (a transform here would replace it). */
 const COUNT: Keyframe[] = [
   { opacity: 0, transform: 'scale(1.9)' },
   { opacity: 1, transform: 'scale(1)', offset: 0.22 },
@@ -76,6 +77,11 @@ const TOAST: Keyframe[] = [
 ];
 
 const HIDE: Keyframe[] = [{ opacity: 0 }, { opacity: 0 }];
+
+const BANK_MS = 1300;
+const BURN_MS = 1500;
+/** Fade-out of a bank / burn flash that is in the way of a new chain card (the card fades in over 250 ms). */
+const CLEAR_MS = 120;
 
 const UTURN_SVG =
   '<svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
@@ -140,6 +146,7 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
     speed: ref('speed'),
     speedBar: ref('speedBar'),
     countBox: qs(layer, '.dr-countdown'),
+    /** The animated part of the countdown (see COUNT). */
     count: ref('count'),
     wrong: qs(layer, '.dr-wrong'),
     toast: qs(layer, '.dr-toast'),
@@ -210,13 +217,36 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
     if (v === null) {
       // «Старт!» fades out on its own (its keyframes end at opacity 0); cutting it here would hide GO
       // whenever the app clears the countdown on the same step that emits 0.
-      if (prev !== 0) play(el.countBox, HIDE, { duration: 1 });
+      if (prev !== 0) play(el.count, HIDE, { duration: 1 });
       return;
     }
     const go = v === 0;
     el.count.textContent = go ? 'Старт!' : String(v);
     el.countBox.toggleAttribute('data-go', go);
-    play(el.countBox, COUNT, { duration: go ? 900 : 1000, easing: 'ease-out' });
+    play(el.count, COUNT, { duration: go ? 900 : 1000, easing: 'ease-out' });
+  }
+
+  /** True while `a` has not drawn a frame yet: started during this very frame (its events came in one batch). */
+  function unseen(a: Animation): boolean {
+    return a.pending || !(Number(a.currentTime) > 0);
+  }
+
+  /**
+   * A new chain card is fading in where the bank / burn flashes play: get them out of its way. Flashes the
+   * player has seen fade out quickly. One that started this frame has not been seen: a bank there is dropped
+   * (the total still bumps), a burn (a glancing heavy hit the car drifted through) moves below the card.
+   */
+  function clearFlashesForChain(): void {
+    const bank = playing(el.bank);
+    if (bank) {
+      if (unseen(bank)) bank.cancel();
+      else fadeOut(el.bank, CLEAR_MS);
+    }
+    const burn = playing(el.burn);
+    if (burn) {
+      if (unseen(burn)) el.burn.classList.add('is-below');
+      else fadeOut(el.burn, CLEAR_MS);
+    }
   }
 
   function update(v: HudView): void {
@@ -284,19 +314,25 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
         setMultiplier(e.value);
         play(el.mult, POP, { duration: 360, easing: 'ease-out' });
         break;
+      case 'chainStart':
+        clearFlashesForChain();
+        break;
       case 'chainBanked':
         if (e.points <= 0) break;
         el.bank.textContent = `+${formatPoints(e.points)}`;
-        play(el.bank, RISE, { duration: 1300, easing: 'ease-out' });
+        play(el.bank, RISE, { duration: BANK_MS, easing: 'ease-out' });
         play(el.total, BUMP, { duration: 380, delay: 450, easing: 'ease-out' });
         break;
       case 'chainBurned':
         el.burn.textContent = e.points > 0 ? `Сгорело ${MINUS}${formatPoints(e.points)}` : 'Сгорело';
-        play(el.burn, DROP, { duration: 1500, easing: 'ease-out' });
+        el.burn.classList.remove('is-below');
+        play(el.burn, DROP, { duration: BURN_MS, easing: 'ease-out' });
         play(el.chain.firstElementChild ?? el.chain, SHAKE, { duration: 360 });
         break;
       case 'penalty':
-        el.penalty.textContent = `${MINUS}${formatPoints(Math.abs(e.points))}`;
+        // The session reports the points actually deducted (the total is floored at 0): nothing to show for 0.
+        if (!(e.points > 0)) break;
+        el.penalty.textContent = `${MINUS}${formatPoints(e.points)}`;
         play(el.penalty, PENALTY, { duration: 1300, easing: 'ease-out' });
         break;
       case 'lap':

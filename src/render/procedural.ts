@@ -42,6 +42,11 @@ const TREE_TOP = 50;
 // ---- Start arch ----
 const ARCH_POST = 1.8;
 const ARCH_HEIGHT = 13;
+/**
+ * The coral band stands this far proud of every post face (a coplanar face z-fights). The posts sit this
+ * much further out so the band's inner face, not the post's, is flush with the span.
+ */
+const BAND_PROUD = 0.04;
 /** Banner bottom stays above the chase camera (height 9.5 m plus shake and near plane). */
 const BANNER_BOTTOM = 10.8;
 const BANNER_TOP = 12.8;
@@ -55,9 +60,9 @@ export const PROCEDURAL_SIZE: Readonly<Record<'bench' | 'bicycle' | 'sneaker' | 
   planterTree: { x: 2 * PLANTER_R, y: TREE_TOP, z: 2 * PLANTER_R },
 };
 
-/** Bounding box of createStartArch(width): posts stand just outside the span. */
+/** Bounding box of createStartArch(width): banded posts stand just outside the span. */
 export function startArchSize(width: number): Size3 {
-  return { x: width + 2 * ARCH_POST, y: ARCH_HEIGHT, z: ARCH_POST };
+  return { x: width + 2 * (ARCH_POST + 2 * BAND_PROUD), y: ARCH_HEIGHT, z: ARCH_POST + 2 * BAND_PROUD };
 }
 
 const COLORS = {
@@ -224,16 +229,20 @@ export function createStartArch(width: number): THREE.Group {
   const parts = new PartSet();
   const half = width / 2;
   const tag = { part: 'arch', occluder: true };
+  // Post inner faces stand BAND_PROUD outside the span.
+  const postInner = half + BAND_PROUD;
   for (const side of [1, -1]) {
-    const x = side * (half + ARCH_POST / 2);
+    const x = side * (postInner + ARCH_POST / 2);
     parts.add(boxAt(ARCH_POST, ARCH_HEIGHT - 0.6, ARCH_POST, x, (ARCH_HEIGHT - 0.6) / 2, 0), white, tag);
     parts.add(boxAt(ARCH_POST + 0.3, 0.6, ARCH_POST, x, ARCH_HEIGHT - 0.3, 0), coral, tag);
-    // Coral band around the post; its inner face stays flush with the span.
-    parts.add(boxAt(ARCH_POST + 0.02, 1.2, ARCH_POST + 0.02, x + side * 0.01, 3.2, 0), coral, tag);
+    // Coral band wrapping the post, proud of all four faces; its inner face is flush with the span.
+    const band = ARCH_POST + 2 * BAND_PROUD;
+    parts.add(boxAt(band, 1.2, band, x, 3.2, 0), coral, tag);
   }
   const bannerH = BANNER_TOP - BANNER_BOTTOM;
   const bannerY = (BANNER_TOP + BANNER_BOTTOM) / 2;
-  parts.add(boxAt(width, bannerH, BANNER_DEPTH, 0, bannerY, 0), coral, { part: 'banner', occluder: true });
+  // The banner reaches the posts' inner faces, BAND_PROUD past the span on each side (it hangs above the camera).
+  parts.add(boxAt(2 * postInner, bannerH, BANNER_DEPTH, 0, bannerY, 0), coral, { part: 'banner', occluder: true });
   addBannerText(parts, 'СТАРТ', white, bannerY, -BANNER_DEPTH / 2);
 
   // Checker panels (2 rows) near both ends of the banner, on both faces.

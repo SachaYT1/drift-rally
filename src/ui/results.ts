@@ -103,7 +103,11 @@ export function showResults(
 
   const onClick = (e: MouseEvent): void => {
     if (!(e.target instanceof Element)) return;
-    switch (e.target.closest<HTMLElement>('[data-act]')?.dataset.act) {
+    const btn = e.target.closest<HTMLElement>('[data-act]');
+    // A pointer click must not leave focus on the button, or the next Enter would press it again instead of
+    // meaning «Ещё раз» (detail === 0: activated from the keyboard, where focus stays put).
+    if (btn && e.detail !== 0) btn.blur();
+    switch (btn?.dataset.act) {
       case 'retry':
         finish(() => h.onRetry());
         break;

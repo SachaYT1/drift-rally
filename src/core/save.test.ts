@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SAVE, SAVE_KEY, loadSave, writeSave } from './save';
+import { DEFAULT_SAVE, SAVE_KEY, loadSave, readSave, updateSave, writeSave } from './save';
 
 class MemStorage {
   map = new Map<string, string>();
@@ -90,5 +90,62 @@ describe('save edge cases', () => {
       expect(loadSave()).toEqual(DEFAULT_SAVE);
       expect(writeSave(data)).toBe(false);
     });
+  });
+});
+
+describe('readSave', () => {
+  it('reads the stored save, defaults for a missing or corrupt record', () => {
+    const s = mem();
+    expect(readSave(s)).toEqual(DEFAULT_SAVE);
+    s.setItem(SAVE_KEY, '{oops');
+    expect(readSave(s)).toEqual(DEFAULT_SAVE);
+    writeSave({ ...DEFAULT_SAVE, coins: 9 }, s);
+    expect(readSave(s)).toEqual({ ...DEFAULT_SAVE, coins: 9 });
+  });
+  it('returns null when storage is unavailable or unreadable', () => {
+    expect(readSave(null)).toBeNull();
+    const bad = { getItem() { throw new Error('SecurityError'); } } as unknown as Storage;
+    expect(readSave(bad)).toBeNull();
+  });
+});
+
+describe('updateSave (read-modify-write)', () => {
+  it('applies the change to the save stored NOW, not to a stale copy, and persists it', () => {
+    const s = mem();
+    const stale = { ...DEFAULT_SAVE, coins: 10 };
+    writeSave({ ...DEFAULT_SAVE, coins: 50, bestScore: 900 }, s); // another tab wrote since `stale` was loaded
+    const next = updateSave((cur) => ({ ...cur, coins: cur.coins + 5 }), stale, s).save;
+    expect(next).toEqual({ ...DEFAULT_SAVE, coins: 55, bestScore: 900 });
+    expect(loadSave(s)).toEqual(next);
+  });
+  it('never mutates the in-memory fallback', () => {
+    const s = mem();
+    writeSave({ ...DEFAULT_SAVE, coins: 3 }, s);
+    const fallback = { ...DEFAULT_SAVE };
+    updateSave((cur) => ({ ...cur, muted: true }), fallback, s);
+    expect(fallback).toEqual(DEFAULT_SAVE);
+  });
+  it('reports whether the result was written', () => {
+    const s = mem();
+    expect(updateSave((cur) => cur, DEFAULT_SAVE, s).written).toBe(true);
+    const full = { getItem: () => null, setItem() { throw new Error('quota'); } } as unknown as Storage;
+    expect(updateSave((cur) => cur, DEFAULT_SAVE, full).written).toBe(false);
+    expect(updateSave((cur) => cur, DEFAULT_SAVE, null).written).toBe(false);
+  });
+  it('builds on the fallback when asked to (it is ahead of the stored save after a failed write)', () => {
+    const s = mem();
+    writeSave({ ...DEFAULT_SAVE, coins: 5 }, s);
+    const ahead = { ...DEFAULT_SAVE, coins: 9 };
+    expect(updateSave((cur) => ({ ...cur, coins: cur.coins + 1 }), ahead, s, true).save.coins).toBe(10);
+    expect(loadSave(s).coins).toBe(10);
+  });
+  it('falls back to the in-memory save when storage is unreachable', () => {
+    const fallback = { ...DEFAULT_SAVE, coins: 40, bestScore: 700 };
+    expect(updateSave((cur) => ({ ...cur, coins: cur.coins + 2 }), fallback, null).save).toEqual({ ...fallback, coins: 42 });
+    const blocked = {
+      getItem() { throw new Error('SecurityError'); },
+      setItem() { throw new Error('SecurityError'); },
+    } as unknown as Storage;
+    expect(updateSave((cur) => ({ ...cur, coins: cur.coins + 2 }), fallback, blocked).save).toEqual({ ...fallback, coins: 42 });
   });
 });

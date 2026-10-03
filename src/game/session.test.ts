@@ -4,116 +4,31 @@ import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { createFixedLoop } from '../core/loop';
 import { TUNING } from '../shared/tuning';
-import { NEUTRAL_INPUT, type Collider, type GameEvent, type InputFrame } from '../shared/types';
-import { clamp, loopDelta, wrapAngle } from '../shared/math';
+import { NEUTRAL_INPUT, type GameEvent, type InputFrame } from '../shared/types';
+import { clamp, wrapAngle } from '../shared/math';
 import { makeCircleTrack } from './testTracks';
-import { DT, FULL_THROTTLE, runFor } from './testSession';
+import { DT, FULL_THROTTLE, autopilotFor, runFor } from './testSession';
 
 const track = buildTrack(PLAZA);
 
-// ---------------------------------------------------------------------------
-// Autopilot (test scaffolding). The plan's plain pure-pursuit version steered by BODY heading while
-// drifting (offset by the slip angle, so it read as counter-steer and ran wide) and never released the
-// throttle (drifts carried onto straights): every chain burned on a barrier. This version is drift-aware.
-// ---------------------------------------------------------------------------
-
-/** Autopilot constants (test-only driving style, not game tuning). */
-const AP = {
-  /** |curvature| ahead that triggers a drift kick / a flick into the opposite direction, 1/m. */
-  kickCurv: 1 / 60,
-  flickCurv: 1 / 60,
-  /** Exit the drift when the required curvature is below this fraction of curvCounter. */
-  exitFrac: 0.5,
-  /** Grip-mode speed limit uses this fraction of car.maxLatAccelGrip. */
-  latShare: 0.85,
-  /** Pursuit look-ahead = lookBase + lookSpeed * speed, m; corner scan window = cornerSpeed * speed, m. */
-  lookBase: 10,
-  lookSpeed: 0.4,
-  cornerSpeed: 0.8,
-  /** Keep this far (m) from the road-side edge of heavy obstacles within avoidRange m along the track. */
-  clearance: 6,
-  avoidRange: 25,
-};
-
-/** Heavy obstacles as (s, lateral of the edge nearest the centreline), via the public Track API. */
-const OBSTACLE_EDGES = track.heavyColliders.flatMap((c: Collider) => {
-  if (c.kind === 'wall') return [];
-  const points = c.kind === 'circle' ? [[c.x, c.z]] : [[c.ax, c.az], [c.bx, c.bz]];
-  return points.map(([x, z]) => {
-    const p = track.project(x, z);
-    return { s: p.s, edge: p.lateral > 0 ? p.lateral - c.r : p.lateral + c.r };
-  });
-});
-
-/** Racing-line lateral at s: steer clear of obstacles that intrude on the road (e.g. the sneaker). */
-function lineAt(s: number): number {
-  let lo = -Infinity;
-  let hi = Infinity;
-  for (const e of OBSTACLE_EDGES) {
-    if (Math.abs(loopDelta(e.s, s, track.length)) > AP.avoidRange) continue;
-    if (e.edge < 0) lo = Math.max(lo, e.edge + AP.clearance);
-    else hi = Math.min(hi, e.edge - AP.clearance);
-  }
-  if (lo > hi) return Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 0;
-  return clamp(0, lo, hi);
-}
-
-/** Signed centreline curvature with the largest magnitude on [s0, s1]. */
-function peakCurvature(s0: number, s1: number): number {
-  let best = 0;
-  for (let s = s0; s <= s1; s += 2) {
-    const k = track.sampleAt(s).curvature;
-    if (Math.abs(k) > Math.abs(best)) best = k;
-  }
-  return best;
-}
+/** The app's drift-aware autopilot (src/app/autopilot.ts) driving the plaza session. */
+const autopilot = autopilotFor(track);
 
 /**
- * Drift-aware pure pursuit. Grip: steer by body heading (inverse bicycle model), brake for the grip
- * lateral limit, kick a drift into tight corners. Drift: pursue with the VELOCITY heading and map the
- * required path curvature onto the drift steer range (counter .. neutral .. into); flick when the next
- * corner turns the other way; release the throttle to exit when the drift cannot run straight enough.
+ * Turns the car around and drives it against the track: steers toward the reversed tangent, pulled back
+ * toward the centreline (facing against the track, +lateral lies on the car's right).
  */
-function autopilot(sess: Session): InputFrame {
-  const D = TUNING.drift;
-  const C = TUNING.car;
+function wrongWayDriver(sess: Session): InputFrame {
   const st = sess.state();
-  const c = st.car;
-  const s = st.progress.s;
-  const v = c.speed;
-  const drifting = c.mode === 'drift';
-  const ref = drifting && v > 1 ? Math.atan2(c.vx, c.vz) : c.heading;
-  const ts = s + AP.lookBase + v * AP.lookSpeed;
-  const target = track.poseAt(ts, lineAt(ts));
-  const dx = target.x - c.x;
-  const dz = target.z - c.z;
-  const kappa = (2 * Math.sin(wrapAngle(Math.atan2(dx, dz) - ref))) / Math.max(1, Math.hypot(dx, dz));
-  const corner = peakCurvature(s + 3, s + 3 + v * AP.cornerSpeed);
-
-  if (drifting) {
-    const dir = c.driftDir;
-    const u = kappa * dir;
-    if (u < -D.curvCounter && corner * dir < -AP.flickCurv) {
-      return { ...NEUTRAL_INPUT, throttle: 1, steer: -dir, handbrake: true, handbrakePressed: true };
-    }
-    const rel =
-      u >= D.curvNeutral
-        ? clamp((u - D.curvNeutral) / (D.curvInto - D.curvNeutral), 0, 1)
-        : -clamp((D.curvNeutral - u) / (D.curvNeutral - D.curvCounter), 0, 1);
-    const exit = u < D.curvCounter * AP.exitFrac && corner * dir < AP.kickCurv;
-    return { ...NEUTRAL_INPUT, throttle: exit ? 0 : 1, steer: rel * dir };
-  }
-
-  if (c.mode === 'grip' && Math.abs(corner) > AP.kickCurv && v > D.minSpeed + 4 && kappa * corner > 0) {
-    return { ...NEUTRAL_INPUT, throttle: 1, steer: Math.sign(corner), handbrake: true, handbrakePressed: true };
-  }
-  const steer = clamp((Math.atan(kappa * C.wheelBase) * (1 + v / C.steerSpeedRef)) / C.maxSteerAngle, -1, 1);
-  const vmax = Math.sqrt((AP.latShare * C.maxLatAccelGrip) / Math.max(Math.abs(corner), 1e-3));
-  const brake = v > vmax + 2 ? 1 : 0;
-  return { ...NEUTRAL_INPUT, throttle: brake ? 0 : 1, brake, steer };
+  const tangent = sess.track.sampleAt(st.progress.s);
+  const target = Math.atan2(-tangent.tx, -tangent.tz) + clamp(st.progress.lateral * 0.05, -0.4, 0.4);
+  const err = wrapAngle(target - st.car.heading);
+  // Creep through the U-turn (tight radius), then drive on.
+  const throttle = Math.abs(err) > 0.5 && st.car.speed > 4 ? 0 : 0.5;
+  return { ...NEUTRAL_INPUT, throttle, steer: clamp(err * 2, -1, 1) };
 }
 
-/** Steps until the race finishes (or maxSeconds); returns every event. */
+/** Steps the autopilot until the race finishes (or maxSeconds); returns every event. */
 function race(sess: Session, maxSeconds = 400) {
   const events: GameEvent[] = [];
   for (let i = 0; i < maxSeconds / DT && sess.state().phase !== 'finished'; i++) {
@@ -220,8 +135,8 @@ describe('session: countdown and teleports', () => {
   it('respawn interpolates from the marker pose and clears an active wrong-way in the same step', () => {
     const sess = createSession(makeCircleTrack());
     runFor(sess, TUNING.race.countdown + 0.05, () => NEUTRAL_INPUT);
-    // Reverse along the track until wrong-way is raised.
-    const ev = runFor(sess, TUNING.car.reverseDelay + TUNING.progress.wrongWayTime + 2, () => ({ ...NEUTRAL_INPUT, brake: 1 }));
+    // Turn around and drive against the track until wrong-way is raised (reversing never raises it).
+    const ev = runFor(sess, TUNING.progress.wrongWayTime + 5, wrongWayDriver);
     expect(ev).toContainEqual({ type: 'wrongWay', active: true });
     expect(sess.state().progress.wrongWay).toBe(true);
 
@@ -233,6 +148,17 @@ describe('session: countdown and teleports', () => {
     const marker = sess.track.poseAt(sess.track.respawnMarkers[0], 0);
     expect(st.prevCar.speed).toBe(0);
     expect(Math.hypot(st.prevCar.x - marker.x, st.prevCar.z - marker.z)).toBeLessThan(1e-6);
+    expect(st.progress.wrongWay).toBe(false);
+  });
+
+  it('reversing along the track never shows wrong-way', () => {
+    const sess = createSession(makeCircleTrack());
+    runFor(sess, TUNING.race.countdown + 0.05, () => NEUTRAL_INPUT);
+    const ev = runFor(sess, TUNING.car.reverseDelay + TUNING.progress.wrongWayTime + 2, () => ({ ...NEUTRAL_INPUT, brake: 1 }));
+    const st = sess.state();
+    expect(st.progress.progressSpeed).toBeLessThan(TUNING.progress.wrongWaySpeed);
+    expect(st.progress.p).toBeLessThan(TUNING.progress.spawnOffset - 5);
+    expect(ev.filter((e) => e.type === 'wrongWay')).toEqual([]);
     expect(st.progress.wrongWay).toBe(false);
   });
 

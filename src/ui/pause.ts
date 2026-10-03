@@ -45,7 +45,7 @@ export function createPauseMenu(
         <button type="button" class="dr-btn" data-act="garage">В гараж</button>
       </div>
       <div class="dr-settings">
-        <div class="dr-setting"><span>Графика</span>
+        <div class="dr-setting"><span>Качество графики</span>
           <div class="dr-seg" role="group" aria-label="Качество графики">${QUALITY_LABELS.map(
             ([q, label]) => `<button type="button" data-quality="${q}" aria-pressed="false">${label}</button>`,
           ).join('')}</div>

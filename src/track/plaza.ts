@@ -18,14 +18,16 @@ const HEAVY: HeavyObstacleDef[] = [
   {
     // Zone 3: parked just outside the right barrier at the apex of the right-hand wiggle, nose
     // turned toward the road. Anchor = bike centre; the front wheel hub sits 6.3 m ahead. Only the
-    // front wheel's ground line collides: it crosses the barrier (lateral ~ -12.4) and reaches
-    // ~ -5.1. The radius covers tyre, fork and mudguard and keeps the blocked span contiguous.
+    // front wheel collides, fitted to the visible tyre at car height (<= ~1.5 m; the tyre's top half
+    // overhangs the car): the road-side end (bx + r = 9.1, the tyre at ~1.1 m) reaches lateral ~ -6.2,
+    // ~0.8 m onto the road; r = tyre half-width. The barrier-side end crosses the barrier (lateral
+    // ~ -12.35), so no car-trapping gap opens between barrier and tyre.
     id: 'bicycle',
     visual: 'bicycle',
     s: 572,
     lateral: -14,
     yaw: 0.9,
-    footprint: [{ type: 'capsule', ax: 3.65, az: 0, bx: 8.95, bz: 0, r: 1.4 }],
+    footprint: [{ type: 'capsule', ax: 3.65, az: 0, bx: 7.8, bz: 0, r: 1.3 }],
   },
   {
     // Zone 7: lies along the inside (right) edge at the left-side kink apex, reaching lateral ~ -4.5.

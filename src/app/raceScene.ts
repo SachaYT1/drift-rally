@@ -94,7 +94,8 @@ export function createRaceScene(
     car.update(c, f.snap ? 0 : dt);
     if (f.snap) chase.snap(c);
     else chase.update(c, dt);
-    env.updateShadows(chase.target.x, chase.target.z);
+    // Shadow box ahead of the car along the camera yaw (car -> look-at point), not around the look-at point.
+    env.updateShadows(c.x, c.z, chase.target.x - c.x, chase.target.z - c.z);
     carCentre.set(c.x, CAR_CENTRE_Y, c.z);
     fader.update(camera, carCentre, dt);
     fx.update(f.effectsCar ?? c, f.surface, dt);

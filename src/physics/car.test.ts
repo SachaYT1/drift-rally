@@ -41,6 +41,7 @@ describe('car physics', () => {
     const c = createCarState(1, 2, 0.5);
     expect(c.mode).toBe('grip');
     expect(c.speed).toBe(0);
+    expect(c).toMatchObject({ flickArm: 0, catchTimer: 0, exitAlign: 0 });
     for (const v of Object.values(c)) if (typeof v === 'number') expect(Number.isFinite(v)).toBe(true);
   });
 
@@ -264,8 +265,15 @@ describe('car physics: edge cases', () => {
     expect(trace.every((x) => x.mode === 'drift')).toBe(true);
   });
 
-  it('held Space with counter-steer does not flick without a fresh press', () => {
-    const { trace } = run(establishedLeftDrift(), 0.3, () => inp({ throttle: 1, steer: -1, handbrake: true }));
+  it('held Space with a counter-steer that is already across does not flick without a fresh press', () => {
+    // Changed by the final review (flick-fails-space-first): Space held while the steer CROSSES over to
+    // the opposite side now flicks (car.driftControls.test.ts). A counter-steer held before Space, with
+    // the wheel already past -flickSteer, still needs a fresh press.
+    // Held shorter than drift.catchTime: a longer full counter-steer would catch the slide.
+    const across = run(establishedLeftDrift(), TUNING.drift.catchTime * 0.85, () => inp({ throttle: 1, steer: -1 })).s;
+    expect(across.mode).toBe('drift');
+    expect(across.steer).toBeLessThanOrEqual(-TUNING.drift.flickSteer);
+    const { trace } = run(across, 0.3, () => inp({ throttle: 1, steer: -1, handbrake: true }));
     expect(trace.every((x) => x.mode === 'drift' && x.driftDir === 1)).toBe(true);
   });
 
@@ -292,7 +300,9 @@ describe('car physics: edge cases', () => {
     for (let i = 1; i < fs.length; i++) expect(fs[i]).toBeGreaterThanOrEqual(fs[i - 1]);
     const stop = fs.findIndex((v) => v >= 0);
     expect(stop).toBeGreaterThan(0);
-    expect(fs[stop]).toBeLessThan(1e-9);
+    // Changed by the final review (dead-throttle-after-crash): the step that reaches 0 drives forward for
+    // the rest of the step, so it carries at most one step of engine acceleration (was: exactly 0).
+    expect(fs[stop]).toBeLessThanOrEqual(TUNING.car.engineAccel * DT + 1e-9);
     expect(stop * DT).toBeLessThanOrEqual(v0 / TUNING.car.brakeDecel + 0.05);
     expect(fs[fs.length - 1]).toBeGreaterThan(0);
   });

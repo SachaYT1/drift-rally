@@ -25,6 +25,23 @@ describe('autopilot', () => {
     expect(events.some((e) => e.type === 'chainBanked' && e.points > 0)).toBe(true);
   });
 
+  it('drives 3 plaza laps cleanly: at most one heavy hit or burned chain, > 15000 points, laps under 60 s', () => {
+    const sess = createSession(track);
+    const drive = createAutopilot(track);
+    const events: GameEvent[] = [];
+    for (let i = 0; i < 300 / DT && sess.state().phase !== 'finished'; i++) {
+      events.push(...sess.step(drive(sess.state()), { respawn: false }, DT));
+    }
+    const r = sess.state().result!;
+    expect(r).not.toBeNull();
+    expect(events.filter((e) => e.type === 'hit').length).toBeLessThanOrEqual(1);
+    expect(events.filter((e) => e.type === 'chainBurned').length).toBeLessThanOrEqual(1);
+    expect(events.filter((e) => e.type === 'respawn')).toHaveLength(0);
+    expect(r.totalPoints).toBeGreaterThan(15000);
+    expect(r.lapTimes).toHaveLength(3);
+    for (const lap of r.lapTimes) expect(lap).toBeLessThan(60);
+  });
+
   it('is deterministic and returns well-formed inputs', () => {
     const run = () => {
       const sess = createSession(track);

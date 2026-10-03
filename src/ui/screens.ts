@@ -33,6 +33,20 @@ export function play(el: Element, frames: Keyframe[], options: KeyframeAnimation
   running.set(el, el.animate(frames, options));
 }
 
+/** The one-shot animation play() last started on `el`, while it is still in effect (running or paused). */
+export function playing(el: Element): Animation | undefined {
+  const a = running.get(el);
+  return a !== undefined && (a.playState === 'running' || a.playState === 'paused') ? a : undefined;
+}
+
+/** Fade `el` out from wherever its one-shot animation has got to, over `ms` (no-op when none is in effect). */
+export function fadeOut(el: Element, ms: number): void {
+  if (!playing(el)) return;
+  const cs = getComputedStyle(el);
+  const transform = cs.transform || 'none';
+  play(el, [{ opacity: cs.opacity || 1, transform }, { opacity: 0, transform }], { duration: ms, easing: 'ease-out' });
+}
+
 export const LOGO_HTML = '<span class="dr-logo"><i class="dr-logo__mark"></i>Drift<b>Rally</b></span>';
 export const COIN_HTML = '<i class="dr-coin" aria-hidden="true"></i>';
 
@@ -52,7 +66,13 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
 
 const FADE_MS = 360;
 
+/** Remove the static placeholder index.html paints before the bundle runs (logo + indeterminate bar). */
+function removeBootScreen(root: HTMLElement): void {
+  root.querySelector(':scope > .dr-boot')?.remove();
+}
+
 export function showLoading(root: HTMLElement): { setProgress(f: number): void; hide(): void } {
+  removeBootScreen(root);
   const layer = createLayer(
     root,
     'dr-screen dr-loading',
@@ -117,6 +137,7 @@ const FATAL: Record<FatalKind, { icon: string; title: string; text: string; extr
 
 /** Cover everything with an error/notice screen (topmost layer). Idempotent per root. */
 export function showFatal(root: HTMLElement, kind: FatalKind): void {
+  removeBootScreen(root);
   root.querySelector(':scope > .dr-fatal')?.remove();
   const f = FATAL[kind];
   const layer = createLayer(
