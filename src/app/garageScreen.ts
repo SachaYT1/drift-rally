@@ -32,6 +32,7 @@ export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStar
     save: opts.lastShown ?? app.save,
     trackName: app.track.def.name,
     onStart: () => start(true),
+    onMute: (m) => app.setMuted(m),
   });
   if (opts.lastShown) ui.update(app.save);
 

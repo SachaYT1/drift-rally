@@ -5,6 +5,7 @@ import { formatPoints, formatTime, pluralRu } from './format';
 import { COIN_HTML, LOGO_HTML, createLayer, isInteractiveTarget, keyHtml, play, qs } from './screens';
 
 export interface GarageUI {
+  /** New save: coins pop in the wallet, records and the sound toggle follow it. */
   update(save: SaveData): void;
   destroy(): void;
 }
@@ -21,6 +22,13 @@ const POP: Keyframe[] = [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }
 
 type ModalKind = 'rules' | 'records';
 const LAP_FORMS = ['круг', 'круга', 'кругов'] as const;
+/** Title of the open modal (one at a time), referenced by its aria-labelledby. */
+const MODAL_TITLE_ID = 'dr-modal-title';
+const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** Speaker; the waves show while sound is on, the cross while muted (styles.css keys off aria-checked). */
+const SOUND_SVG =
+  '<svg viewBox="0 0 24 24" width="1.25em" height="1.25em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><g class="dr-sound__on"><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/></g><g class="dr-sound__off"><path d="m15.5 9.5 5 5m0-5-5 5"/></g></svg>';
 
 function escapeText(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -44,22 +52,26 @@ function rulesHtml(): string {
     [keyHtml('S') + keyHtml('↓'), 'тормоз, задний ход'],
     [keyHtml('A') + keyHtml('D'), 'руль (или ← →)'],
     [keyHtml('Пробел'), 'ручник, вход в дрифт'],
-    [keyHtml('R'), 'вернуться на трассу'],
+    [keyHtml('R'), 'вернуться на трассу (сжигает цепочку)'],
     [keyHtml('Esc'), 'пауза'],
     [keyHtml('M'), 'звук вкл/выкл'],
   ];
   const grace = String(sc.graceTime).replace('.', ',');
-  return `<h2 class="dr-h dr-modal__title">Правила</h2>
+  return `<h2 class="dr-h dr-modal__title" id="${MODAL_TITLE_ID}">Правила</h2>
     <div class="dr-rules">
       <section><h3>Управление</h3>
         <div class="dr-keys">${keys.map(([k, t]) => `<span>${k}</span><span>${t}</span>`).join('')}</div>
+        <ul class="dr-keys-note">
+          <li>${keyHtml('S')} в заносе — тормоз и выход из заноса</li>
+          <li>${keyHtml('W')} отпустите газ — машина выравнивается</li>
+        </ul>
       </section>
       <section><h3>Как набирать очки</h3>
         <ul class="dr-rule-list">
           <li>Войдите в поворот на скорости, держите руль и нажмите <b>пробел</b> — машина уйдёт в занос и будет держать его сама. Руль внутрь — круче дуга, наружу — прямее.</li>
           <li>Очки капают, пока вы в заносе на асфальте и едете вперёд. Больше угол и скорость — быстрее счёт.</li>
           <li>Не прерывайте дрифт: каждые ${sc.multiplierStep} с множитель растёт, до <b>×${sc.multiplierMax}</b>. После заноса есть ${grace} с, чтобы продолжить цепочку, — потом она уходит в зачёт.</li>
-          <li>Сильный удар <b>сжигает цепочку</b>. Сбитая банка или стакан — минус ${sc.propPenalty} очков.</li>
+          <li>Сильный удар или возврат на трассу (${keyHtml('R')}) <b>сжигают цепочку</b>. Сбитая банка или стакан — минус ${sc.propPenalty} очков.</li>
           <li>${TUNING.race.laps} ${pluralRu(TUNING.race.laps, LAP_FORMS)} на заезд. Монеты — на трассе и по одной за каждые ${formatPoints(sc.pointsPerCoin)} очков.</li>
         </ul>
       </section>
@@ -70,7 +82,7 @@ function recordsHtml(save: SaveData): string {
   const hasRun = save.bestScore > 0 || save.bestLapMs !== null;
   const best = hasRun ? formatPoints(save.bestScore) : '—';
   const lap = save.bestLapMs === null ? '—' : formatTime(save.bestLapMs / 1000);
-  return `<h2 class="dr-h dr-modal__title">Рекорды</h2>
+  return `<h2 class="dr-h dr-modal__title" id="${MODAL_TITLE_ID}">Рекорды</h2>
     <div class="dr-records">
       <div class="dr-tile"><span class="dr-eyebrow">Лучший счёт</span><b class="dr-num">${best}</b></div>
       <div class="dr-tile"><span class="dr-eyebrow">Лучший круг</span><b class="dr-num">${lap}</b></div>
@@ -81,7 +93,13 @@ function recordsHtml(save: SaveData): string {
 
 export function createGarageUI(
   root: HTMLElement,
-  opts: { save: SaveData; trackName: string; onStart(): void },
+  opts: {
+    save: SaveData;
+    trackName: string;
+    onStart(): void;
+    /** The sound toggle or M flipped mute (the UI already shows the new state). */
+    onMute(muted: boolean): void;
+  },
 ): GarageUI {
   const laps = TUNING.race.laps;
   const layer = createLayer(
@@ -94,7 +112,10 @@ export function createGarageUI(
         <button type="button" class="dr-nav__item" aria-current="page" data-open="garage">Гараж</button>
         <button type="button" class="dr-nav__item" data-open="records">Рекорды</button>
       </nav>
-      <div class="dr-wallet" title="Монеты">${COIN_HTML}<span class="dr-wallet__n dr-num"></span></div>
+      <div class="dr-topbar__end">
+        <button type="button" class="dr-sound" role="switch" aria-checked="true" aria-label="Звук" title="Звук (M)">${SOUND_SVG}${keyHtml('M')}</button>
+        <div class="dr-wallet" title="Монеты">${COIN_HTML}<span class="dr-wallet__n dr-num"></span></div>
+      </div>
     </header>
     <section class="dr-panel dr-car">
       <div class="dr-eyebrow">Ваша машина</div>
@@ -116,14 +137,30 @@ export function createGarageUI(
   const wallet = qs(layer, '.dr-wallet .dr-coin');
   const bestScore = qs(layer, '.dr-track__score');
   const cta = qs<HTMLButtonElement>(layer, '.dr-cta');
+  const soundBtn = qs<HTMLButtonElement>(layer, '.dr-sound');
   const navButtons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.dr-nav__item'));
+  /** Everything behind a modal: inert while one is open, so neither Tab nor a screen reader reaches it. */
+  const background = Array.from(layer.children).filter((c): c is HTMLElement => c instanceof HTMLElement);
 
   let save = opts.save;
+  let muted = save.muted;
   let started = false;
   /** `refocus`: the modal was opened from the keyboard, so focus goes back to its opener on close. */
   let modal: { kind: ModalKind; el: HTMLElement; body: HTMLElement; opener: HTMLElement; refocus: boolean } | null = null;
 
+  function renderSound(): void {
+    soundBtn.setAttribute('aria-checked', String(!muted));
+  }
+
+  function toggleMute(): void {
+    muted = !muted;
+    renderSound();
+    opts.onMute(muted);
+  }
+
   function render(prevCoins: number | null): void {
+    muted = save.muted;
+    renderSound();
     walletN.textContent = formatPoints(save.coins);
     bestScore.textContent = save.bestScore > 0 ? formatPoints(save.bestScore) : '—';
     if (prevCoins !== null && save.coins !== prevCoins) play(wallet, POP, { duration: 420, easing: 'ease-out' });
@@ -141,6 +178,7 @@ export function createGarageUI(
     const { el, opener, refocus } = modal;
     modal = null;
     el.remove();
+    for (const b of background) b.removeAttribute('inert');
     for (const b of navButtons) b.classList.remove('is-open');
     // Only keyboard users get focus back on the nav button: for a mouse user a focused nav button
     // would swallow the next Enter (re-opening the modal) instead of starting the race.
@@ -154,10 +192,12 @@ export function createGarageUI(
     el.className = 'dr-modal';
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', MODAL_TITLE_ID);
     el.innerHTML = `<div class="dr-dim" data-close></div>
       <div class="dr-panel dr-modal__card"><button type="button" class="dr-close" aria-label="Закрыть" data-close></button><div class="dr-modal__body"></div></div>`;
     const body = qs(el, '.dr-modal__body');
     body.innerHTML = kind === 'rules' ? rulesHtml() : recordsHtml(save);
+    for (const b of background) b.setAttribute('inert', '');
     layer.appendChild(el);
     modal = { kind, el, body, opener, refocus };
     opener.classList.add('is-open');
@@ -165,6 +205,16 @@ export function createGarageUI(
       if (e.target instanceof Element && e.target.closest('[data-close]')) closeModal();
     });
     qs(el, '.dr-close').focus({ preventScroll: true });
+  }
+
+  /** Tab / Shift+Tab cycle through the open modal's controls only (the inert background also hides it from assistive tech). */
+  function trapTab(e: KeyboardEvent, dialog: HTMLElement): void {
+    const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+    e.preventDefault();
+    if (items.length === 0) return;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = at < 0 ? 0 : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length;
+    items[next].focus({ preventScroll: true });
   }
 
   /** One-shot: a double click or two quick Enters must not start two races before destroy(). */
@@ -187,10 +237,22 @@ export function createGarageUI(
   };
   for (const b of navButtons) b.addEventListener('click', onNav);
   cta.addEventListener('click', start);
+  const onSound = (e: MouseEvent): void => {
+    // A pointer click must not leave focus here, or the next Enter would toggle sound instead of starting.
+    if (e.detail !== 0) soundBtn.blur();
+    toggleMute();
+  };
+  soundBtn.addEventListener('click', onSound);
 
   const onKey = (e: KeyboardEvent): void => {
+    if (e.code === 'Tab' && modal) {
+      trapTab(e, modal.el);
+      return;
+    }
     if (e.repeat) return;
-    if (e.code === 'Escape' && modal) {
+    if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      toggleMute();
+    } else if (e.code === 'Escape' && modal) {
       e.preventDefault();
       closeModal();
     } else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && !modal && !isInteractiveTarget(e.target)) {
