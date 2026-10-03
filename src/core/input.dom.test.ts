@@ -2,41 +2,26 @@
  * Input against real DOM targets (jsdom): focused controls keep the Space / arrow behaviour they need, every
  * other target has page scrolling blocked (it would scroll an embedding page, e.g. an itch.io iframe host).
  *
- * jsdom 27 needs require(esm) (Node >= 22.12, the CI version); on an older Node the suite is skipped.
+ * installDom() rejects when jsdom cannot be loaded, so this file fails loudly instead of being skipped.
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { installDom } from '../ui/domTestEnv';
 import { createInput } from './input';
 
-interface Jsdom {
-  JSDOM: new (html: string) => { window: Window & typeof globalThis };
-}
+const win = await installDom();
+afterAll(() => vi.unstubAllGlobals());
 
-/** A string specifier keeps the bundler and the type checker out of it (jsdom ships no types). */
-const JSDOM_MODULE = 'jsdom';
-
-async function domWindow(): Promise<(Window & typeof globalThis) | null> {
-  try {
-    const { JSDOM } = (await import(/* @vite-ignore */ JSDOM_MODULE)) as Jsdom;
-    return new JSDOM('<!doctype html><html><body></body></html>').window;
-  } catch (err) {
-    if ((err as { code?: string }).code === 'ERR_REQUIRE_ESM') return null;
-    throw err;
-  }
-}
-
-const win = await domWindow();
-
-describe.skipIf(!win)('input on DOM targets', () => {
+describe('input on DOM targets', () => {
   function keydown(target: EventTarget, code: string): boolean {
-    const e = new win!.KeyboardEvent('keydown', { code, bubbles: true, cancelable: true });
+    const e = new win.KeyboardEvent('keydown', { code, bubbles: true, cancelable: true });
     target.dispatchEvent(e);
     return e.defaultPrevented;
   }
 
   function mount(html: string) {
-    const doc = win!.document;
+    const doc = win.document;
     doc.body.innerHTML = html;
-    const inp = createInput(win!);
+    const inp = createInput(win);
     return { inp, body: doc.body, q: (sel: string) => doc.querySelector(sel)! };
   }
 
