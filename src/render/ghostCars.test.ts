@@ -28,7 +28,7 @@ function meshes(root: THREE.Object3D): THREE.Mesh[] {
 const single = (m: THREE.Mesh): THREE.Material => m.material as THREE.Material;
 
 function view(x: number, z: number, opacity = GHOST_OPACITY, visible = true): GhostView {
-  return { car: createCarState(x, z, 0.5), points: 1234, opacity, visible };
+  return { car: createCarState(x, z, 0.5), points: 1234, opacity, visible, snap: false };
 }
 
 describe('ghostOpacity', () => {
@@ -96,7 +96,7 @@ describe('ghost layer', () => {
     const layer = createGhostLayer();
     layer.setRoster(ROSTER);
     const camera = new THREE.Vector3(0, 10, 0);
-    layer.update([view(10, 20), view(-5, 3, 0.2), view(0, 0, GHOST_OPACITY, false)], true, 0, camera);
+    layer.update([view(10, 20), view(-5, 3, 0.2), view(0, 0, GHOST_OPACITY, false)], 0, camera);
     const [a, b, c] = layer.group.children;
     expect(a.visible).toBe(true);
     expect(a.position.x).toBeCloseTo(10);
@@ -109,7 +109,7 @@ describe('ghost layer', () => {
     for (const o of opacityOf(a)) expect(o).toBeCloseTo(GHOST_OPACITY);
     for (const o of opacityOf(b)) expect(o).toBeCloseTo(0.2);
     expect(c.visible).toBe(false);
-    layer.update([view(10, 20, 0), view(-5, 3), view(0, 0)], false, 1 / 60, camera);
+    layer.update([view(10, 20, 0), view(-5, 3), view(0, 0)], 1 / 60, camera);
     expect(a.visible).toBe(false);
     expect(c.visible).toBe(true);
   });
@@ -126,14 +126,14 @@ describe('ghost layer', () => {
     };
     expect(sprites()).toHaveLength(3);
     const far = LABEL_MAX_DISTANCE + 50;
-    layer.update([view(0, 0), view(far, 0), view(0, 5)], true, 0, new THREE.Vector3(0, 10, 0));
+    layer.update([view(0, 0), view(far, 0), view(0, 5)], 0, new THREE.Vector3(0, 10, 0));
     expect(sprites().map((s) => s.visible)).toEqual([true, false, true]);
   });
 
   it('hide() hides every ghost', () => {
     const layer = createGhostLayer();
     layer.setRoster(ROSTER);
-    layer.update([view(0, 0), view(5, 0), view(10, 0)], true, 0, new THREE.Vector3());
+    layer.update([view(0, 0), view(5, 0), view(10, 0)], 0, new THREE.Vector3());
     layer.hide();
     for (const g of layer.group.children) expect(g.visible).toBe(false);
   });
@@ -141,9 +141,9 @@ describe('ghost layer', () => {
   it('ignores views beyond the roster and hides ghosts without a view', () => {
     const layer = createGhostLayer();
     layer.setRoster(ROSTER.slice(0, 2));
-    layer.update([view(0, 0), view(1, 1), view(2, 2)], true, 0, new THREE.Vector3());
+    layer.update([view(0, 0), view(1, 1), view(2, 2)], 0, new THREE.Vector3());
     expect(layer.group.children.map((g) => g.visible)).toEqual([true, true]);
-    layer.update([view(0, 0)], false, 1 / 60, new THREE.Vector3());
+    layer.update([view(0, 0)], 1 / 60, new THREE.Vector3());
     expect(layer.group.children.map((g) => g.visible)).toEqual([true, false]);
   });
 });

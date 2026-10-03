@@ -47,6 +47,8 @@ export interface GhostView {
   /** Final opacity of the body (ghostOpacity()). */
   opacity: number;
   visible: boolean;
+  /** The bot teleported (race start, respawn): settle the model instead of animating the jump. */
+  snap: boolean;
 }
 
 export interface GhostLayer {
@@ -55,9 +57,9 @@ export interface GhostLayer {
   setRoster(defs: readonly { name: string; color: number }[]): void;
   /**
    * One render: pose, wheels and body motion, opacity, label. `views[i]` drives ghost i; ghosts without a view
-   * are hidden. `snap`: teleport (race start), settle the models. `cameraPos` limits the label range.
+   * are hidden. `cameraPos` limits the label range.
    */
-  update(views: readonly GhostView[], snap: boolean, dt: number, cameraPos: THREE.Vector3): void;
+  update(views: readonly GhostView[], dt: number, cameraPos: THREE.Vector3): void;
   hide(): void;
 }
 
@@ -217,7 +219,7 @@ export function createGhostLayer(): GhostLayer {
         return g;
       });
     },
-    update(views, snap, dt, cameraPos) {
+    update(views, dt, cameraPos) {
       for (let i = 0; i < ghosts.length; i++) {
         const g = ghosts[i];
         const v = views[i];
@@ -229,9 +231,10 @@ export function createGhostLayer(): GhostLayer {
         const wasHidden = !g.root.visible;
         g.root.visible = true;
         applyPose(g.root, c.x, c.z, c.heading);
-        // A ghost that reappears (race start) settles like a teleported car.
-        if (snap || wasHidden) g.model.reset();
-        g.model.update(c, snap || wasHidden ? 0 : dt);
+        // A ghost that reappears (it overlapped the player's car, e.g. on the start grid) settles like a teleport.
+        const settle = v.snap || wasHidden;
+        if (settle) g.model.reset();
+        g.model.update(c, settle ? 0 : dt);
         setOpacity(g, v.opacity);
 
         const l = g.label;

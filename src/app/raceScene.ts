@@ -114,7 +114,7 @@ export function createRaceScene(
     fx.update(f.effectsCar ?? c, f.surface, dt);
     props.update(f.pickups, f.simTime, dt);
     bombs.update(f.bombs ?? null, f.simTime);
-    if (f.ghosts) ghosts.update(f.ghosts, f.snap, dt, camera.position);
+    if (f.ghosts) ghosts.update(f.ghosts, dt, camera.position);
     else ghosts.hide();
   }
 

@@ -67,6 +67,7 @@ function prewarmGhosts(car: CarState, fx: number, fz: number): GhostView[] {
     points: 0,
     opacity: GHOST_OPACITY,
     visible: true,
+    snap: false,
   }));
 }
 

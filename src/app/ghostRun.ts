@@ -20,8 +20,11 @@ export interface GhostRun {
   step(dt: number): void;
   /** The player finished: fast-forward the bots to their results and fade every ghost out where it is. */
   finish(): void;
-  /** Ghost views for one render: `alpha` between the last two steps, `player` = the drawn player car. */
-  views(alpha: number, snap: boolean, player: Readonly<CarState>, dt: number): readonly GhostView[];
+  /**
+   * Ghost views for one render: `alpha` between the last two steps, `player` = the drawn player car. Only a bot's
+   * own teleport snaps its ghost (the player's respawn does not).
+   */
+  views(alpha: number, player: Readonly<CarState>, dt: number): readonly GhostView[];
   /** Live standings (`player.points`: banked plus the running chain, like livePoints()). */
   standings(player: { points: number; finished: boolean }): StandingRow[];
   /** Standings after finish(): every bot's result. */
@@ -37,6 +40,7 @@ export function createGhostRun(track: Track, roster: readonly BotDef[] = BOTS): 
     points: 0,
     opacity: 0,
     visible: false,
+    snap: true,
   }));
 
   return {
@@ -50,19 +54,20 @@ export function createGhostRun(track: Track, roster: readonly BotDef[] = BOTS): 
       // The views keep the poses last drawn: the fast-forward must not teleport the fading ghosts.
       field.fastForward();
     },
-    views(alpha, snap, player, dt) {
+    views(alpha, player, dt) {
       for (let i = 0; i < out.length; i++) {
         const st = field.bots[i].session.state();
         const v = out[i];
         const done = st.phase === 'finished';
         if (!finished) {
           // A finished session no longer steps: draw its final pose, not a blend with the step before.
-          interpolateCar(st.prevCar, st.car, done ? 1 : alpha, snap || st.teleported, v.car);
+          interpolateCar(st.prevCar, st.car, done ? 1 : alpha, st.teleported, v.car);
           v.points = livePoints(st.score);
         }
         if (finished || done) fades[i] = Math.max(0, fades[i] - dt / GHOST_FADE_TIME);
         v.opacity = ghostOpacity(Math.hypot(v.car.x - player.x, v.car.z - player.z), fades[i]);
         v.visible = fades[i] > 0;
+        v.snap = !finished && st.teleported;
       }
       return out;
     },

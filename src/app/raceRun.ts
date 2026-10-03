@@ -146,7 +146,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     frame.bombs = st.bombs;
     frame.simTime = simClock;
     frame.snap = snapPending;
-    frame.ghosts = ghosts ? ghosts.views(alpha, snapPending, car, dt) : null;
+    frame.ghosts = ghosts ? ghosts.views(alpha, car, dt) : null;
     race.sync(frame, dt);
     snapPending = false;
     audio.update(car, throttle, car.mode === 'drift', dt);

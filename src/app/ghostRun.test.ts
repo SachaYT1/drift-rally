@@ -28,39 +28,46 @@ describe('ghost run', () => {
   it('gives one view per bot, reused between frames, interpolated between the last two steps', () => {
     const run = createGhostRun(track);
     stepFor(run, TUNING.race.countdown + 4);
-    const a = run.views(0, false, FAR, FRAME);
-    const b = run.views(1, false, FAR, FRAME);
+    const a = run.views(0, FAR, FRAME);
+    const b = run.views(1, FAR, FRAME);
     expect(b).toBe(a);
     expect(a).toHaveLength(BOTS.length);
     const st = run.field.bots[0].session.state();
-    expect(run.views(1, false, FAR, FRAME)[0].car.x).toBeCloseTo(st.car.x);
-    expect(run.views(0, false, FAR, FRAME)[0].car.x).toBeCloseTo(st.prevCar.x);
+    expect(run.views(1, FAR, FRAME)[0].car.x).toBeCloseTo(st.car.x);
+    expect(run.views(0, FAR, FRAME)[0].car.x).toBeCloseTo(st.prevCar.x);
     expect(a[0].points).toBe(st.score.totalPoints + st.score.chainPoints);
     expect(a[0].visible).toBe(true);
     expect(a[0].opacity).toBeCloseTo(GHOST_OPACITY);
   });
 
+  it('snaps a ghost only on its own bot\'s teleport (the start), not on later frames', () => {
+    const run = createGhostRun(track);
+    expect(run.views(1, FAR, FRAME).every((v) => v.snap)).toBe(true);
+    stepFor(run, TUNING.race.countdown + 1);
+    expect(run.views(0.5, FAR, FRAME).some((v) => v.snap)).toBe(false);
+  });
+
   it('hides a ghost that sits on the player car', () => {
     const run = createGhostRun(track);
     // Countdown: every bot waits on the spawn pose, like the player.
-    const views = run.views(1, true, createCarState(spawn.x, spawn.z, spawn.heading), FRAME);
+    const views = run.views(1, createCarState(spawn.x, spawn.z, spawn.heading), FRAME);
     for (const v of views) expect(v.opacity).toBe(0);
   });
 
   it('finish() fast-forwards the bots, freezes the ghosts where they were and fades them out', () => {
     const run = createGhostRun(track);
     stepFor(run, TUNING.race.countdown + 10);
-    const before = run.views(1, false, FAR, FRAME).map((v) => ({ x: v.car.x, z: v.car.z }));
+    const before = run.views(1, FAR, FRAME).map((v) => ({ x: v.car.x, z: v.car.z }));
     run.finish();
     for (const b of run.field.bots) expect(b.session.state().phase).toBe('finished');
-    const frozen = run.views(1, false, FAR, FRAME);
+    const frozen = run.views(1, FAR, FRAME);
     frozen.forEach((v, i) => {
       expect(v.car.x).toBeCloseTo(before[i].x);
       expect(v.car.z).toBeCloseTo(before[i].z);
       expect(v.opacity).toBeLessThan(GHOST_OPACITY);
     });
-    for (let t = 0; t < GHOST_FADE_TIME; t += FRAME) run.views(1, false, FAR, FRAME);
-    for (const v of run.views(1, false, FAR, FRAME)) expect(v.visible).toBe(false);
+    for (let t = 0; t < GHOST_FADE_TIME; t += FRAME) run.views(1, FAR, FRAME);
+    for (const v of run.views(1, FAR, FRAME)) expect(v.visible).toBe(false);
     // Bots no longer step after the player's finish.
     const time = run.field.bots[0].session.state().time;
     run.step(DT);
@@ -73,8 +80,8 @@ describe('ghost run', () => {
     // Drive only until the first bot crosses the line.
     for (let i = 0; i < 400 / DT && first.session.state().phase !== 'finished'; i++) run.step(DT);
     expect(first.session.state().phase).toBe('finished');
-    for (let t = 0; t <= GHOST_FADE_TIME + FRAME; t += FRAME) run.views(1, false, FAR, FRAME);
-    const v = run.views(1, false, FAR, FRAME);
+    for (let t = 0; t <= GHOST_FADE_TIME + FRAME; t += FRAME) run.views(1, FAR, FRAME);
+    const v = run.views(1, FAR, FRAME);
     expect(v[0].visible).toBe(false);
     expect(v[0].points).toBe(first.session.state().result?.totalPoints);
   });
