@@ -10,6 +10,10 @@
  * less than exitCurv into the drift, leave it the way a player would (design spec §2.3): S when well over
  * the grip limit ahead, lift W when just over it, otherwise catch the slide (full counter-steer on W, held
  * once the wheel is across until the catch completes, as full counter-steer bends the path slightly outward).
+ *
+ * A style (AutopilotStyle) sets the skill; the defaults are the reference driver. Weaker: a throttle cap,
+ * drifts left after maxDriftTime and not linked into chains (linkDrifts). Stronger: keepChain stays in one
+ * drift from the first kick to the finish, so the multiplier holds its top across the straights.
  */
 import { NEUTRAL_INPUT, type Collider, type InputFrame } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
@@ -37,6 +41,7 @@ export const AUTOPILOT = {
   /**
    * Holding a drift while the path still curves into it, counter-steer stays this far short of
    * drift.catchSteer (no accidental catch); once it needs a straight path, full counter-steer catches.
+   * Keeping the chain (keepChain), every hold stays this far short of a catch.
    */
   catchMargin: 0.1,
   /** Grip-mode speed limit uses this fraction of car.maxLatAccelGrip. */
@@ -58,6 +63,24 @@ export const AUTOPILOT = {
   kickSpeedMargin: 4,
   /** Brake (grip, or out of a drift) when faster than the grip limit + this, m/s. */
   brakeMargin: 6,
+  /** Highest throttle ever output (grip, kicks and drift), 0..1. Below 1 the drift settles much slower. */
+  throttleCap: 1,
+  /** Leave a drift (the usual S / lift / catch exit) after this many seconds in it; Infinity: never. */
+  maxDriftTime: Infinity,
+  /**
+   * 1: kick into the next corner while the last chain is still in its grace, linking the drifts into one
+   * chain. 0: kick only once it has banked, braking for the grip limit meanwhile, so every drift scores on
+   * its own at a low multiplier.
+   */
+  linkDrifts: 1,
+  /**
+   * 1: keep the chain from the first kick to the finish: never leave a drift on purpose, slide down the
+   * straights with counter-steer catchMargin short of a catch (a nearly straight path, drift.curvCounter),
+   * flick to bend the other way. 0: leave the drift once the path ahead straightens (exitCurv).
+   */
+  keepChain: 0,
+  /** Keeping the chain, flick once the path ahead needs more than this curvature away from the drift, 1/m. */
+  keepFlickCurv: 1 / 300,
 } as const;
 
 /** A driving style: AUTOPILOT with any constant overridden (tests and tuning sweeps). */
@@ -131,34 +154,43 @@ export function createAutopilot(track: Track, t: Tuning = TUNING, AP: AutopilotS
     // Grip corner speed limit for the peak curvature ahead.
     const vmax = Math.sqrt((AP.latShare * C.maxLatAccelGrip) / Math.max(Math.abs(corner), 1e-3));
 
+    const gas = AP.throttleCap;
+    const keep = AP.keepChain > 0;
     if (drifting) {
       const dir = c.driftDir;
       const u = kappa * dir;
-      if (u < 0 && corner * dir < -AP.flickCurv) {
-        return { ...NEUTRAL_INPUT, throttle: 1, steer: -dir, handbrake: true, handbrakePressed: true };
+      // Flick when the next corner turns the other way, or (keeping the chain) when the path bends away
+      // from the drift more than a hold short of a catch can follow.
+      if (u < 0 && (corner * dir < -AP.flickCurv || (keep && u < -AP.keepFlickCurv))) {
+        return { ...NEUTRAL_INPUT, throttle: gas, steer: -dir, handbrake: true, handbrakePressed: true };
       }
       const rel =
         u >= D.curvNeutral
           ? clamp((u - D.curvNeutral) / (D.curvInto - D.curvNeutral), 0, 1)
           : -clamp((D.curvNeutral - u) / (D.curvNeutral - D.curvCounter), 0, 1);
+      const floor = AP.catchMargin - D.catchSteer;
+      if (keep) return { ...NEUTRAL_INPUT, throttle: gas, steer: Math.max(rel, floor) * dir };
       const catching = c.steer * dir <= -D.catchSteer;
-      if (u >= (catching ? AP.catchCommitCurv : AP.exitCurv) || corner * dir >= AP.kickCurv) {
-        const hold = u > 0 ? Math.max(rel, AP.catchMargin - D.catchSteer) : rel;
-        return { ...NEUTRAL_INPUT, throttle: 1, steer: hold * dir };
+      const tired = c.driftTime >= AP.maxDriftTime;
+      if (!tired && (u >= (catching ? AP.catchCommitCurv : AP.exitCurv) || corner * dir >= AP.kickCurv)) {
+        const hold = u > 0 ? Math.max(rel, floor) : rel;
+        return { ...NEUTRAL_INPUT, throttle: gas, steer: hold * dir };
       }
       // Leave the drift: S when well over the grip limit ahead, lift W when just over it, else catch the
       // slide with full counter-steer on W (keeps the speed; the exit keeps the direction of travel).
       if (v > vmax + AP.brakeMargin) return { ...NEUTRAL_INPUT, brake: 1, steer: rel * dir };
       if (v > vmax) return { ...NEUTRAL_INPUT, steer: rel * dir };
-      return { ...NEUTRAL_INPUT, throttle: 1, steer: -dir };
+      return { ...NEUTRAL_INPUT, throttle: gas, steer: -dir };
     }
 
-    if (c.mode === 'grip' && Math.abs(corner) > AP.kickCurv && v > D.minSpeed + AP.kickSpeedMargin && kappa * corner > 0) {
-      return { ...NEUTRAL_INPUT, throttle: 1, steer: Math.sign(corner), handbrake: true, handbrakePressed: true };
+    // Not linking drifts, no kick while the last chain is in its grace: brake for that corner like a grip one.
+    const kickable = Math.abs(corner) > AP.kickCurv && (AP.linkDrifts > 0 || st.score.phase !== 'grace');
+    if (c.mode === 'grip' && kickable && v > D.minSpeed + AP.kickSpeedMargin && kappa * corner > 0) {
+      return { ...NEUTRAL_INPUT, throttle: gas, steer: Math.sign(corner), handbrake: true, handbrakePressed: true };
     }
     const steer = clamp((Math.atan(kappa * C.wheelBase) * (1 + v / C.steerSpeedRef)) / C.maxSteerAngle, -1, 1);
     // No braking for a drift corner ahead: the drift takes it at speed.
-    const brake = v > vmax + AP.brakeMargin && Math.abs(corner) <= AP.kickCurv ? 1 : 0;
-    return { ...NEUTRAL_INPUT, throttle: brake ? 0 : 1, brake, steer };
+    const brake = v > vmax + AP.brakeMargin && !kickable ? 1 : 0;
+    return { ...NEUTRAL_INPUT, throttle: brake ? 0 : gas, brake, steer };
   };
 }
