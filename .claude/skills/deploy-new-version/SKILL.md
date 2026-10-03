@@ -17,7 +17,7 @@ checked out in another worktree (`git worktree list`). Note the branch it is on:
 end. Commit messages are English (Conventional Commits); the changelog, tag message and release title are Russian.
 
 **Push, tag and GitHub Release are public.** Run this only when the user asked for a release. Never force-push,
-never move or delete a pushed tag, never rewrite `master`.
+never move or delete a pushed tag, never rewrite pushed history of `master` or `develop`.
 
 ## Stop and ask when
 
@@ -29,11 +29,14 @@ never move or delete a pushed tag, never rewrite `master`.
   merge result is untested: the branch owner merges `develop` into it in its worktree, re-tests, then you release.
   A conflict in `CHANGELOG.md` alone you resolve yourself (step 2);
 - it is unclear which branches ship, or `## [Unreleased]` in `CHANGELOG.md` does not describe them;
-- any check in step 5 fails (fix on `develop`, start again).
+- `git log --oneline origin/develop..develop` shows local commits nobody mentioned: everything there ships;
+- any check in step 5 fails: nothing is pushed yet, so drop the local release merge
+  (`git switch master && git reset --hard origin/master`), fix on `develop`, start again from step 3.
 
 ## Pipeline
 
-**0. Sync.** `git fetch origin --prune --tags`; `git status` clean; `git pull --ff-only` on `develop` and `master`.
+**0. Sync.** `git fetch origin --prune --tags`; `git status` clean; then
+`git switch master && git pull --ff-only` and `git switch develop && git pull --ff-only`.
 
 **1. Version.** SemVer `0.MINOR.PATCH` from `git describe --tags --abbrev=0 origin/master`: MINOR for new features
 or noticeable gameplay changes, PATCH for fixes only.
@@ -86,8 +89,9 @@ js=$(curl -s https://sachayt1.github.io/drift-rally/ | grep -o 'assets/index-[^"
 curl -s "https://sachayt1.github.io/drift-rally/$js" | grep -o '"X.Y.Z"'
 ```
 
-**10. Tidy up.** Delete merged branches you own (`git branch -d feature/<name>`). A branch checked out in a worktree
-cannot be deleted: leave it and the worktree unless the user asks (`git worktree remove .claude/worktrees/<name>`,
+**10. Tidy up.** Delete the feature branches merged for this release that no worktree has checked out
+(`git branch -d feature/<name>`). A branch checked out in a worktree cannot be deleted: leave it and the worktree
+unless the user asks (`git worktree remove .claude/worktrees/<name>`,
 then `git branch -d`). Switch back to the branch you started on. Report: version, tag, release URL, deploy run,
 live check.
 
