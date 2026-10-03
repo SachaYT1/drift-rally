@@ -35,6 +35,8 @@ export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStar
     onMute: (m) => app.setMuted(m),
   });
   if (opts.lastShown) ui.update(app.save);
+  // Coins or records saved by another tab while this garage is up.
+  const offSave = app.onSaveChanged((save) => ui.update(save));
 
   function draw(): void {
     renderer.render(garage.scene, garage.camera);
@@ -55,6 +57,7 @@ export function enterGarage(app: App, opts: { lastShown: SaveData | null; onStar
     if (destroyed) return;
     destroyed = true;
     cancelAnimationFrame(raf);
+    offSave();
     ui.destroy();
     if (app.redraw === draw) app.redraw = null;
   }
