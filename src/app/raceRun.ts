@@ -190,7 +190,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     finished = true;
     // Saved once, at the finish; quitting earlier forfeits (design spec §2.5). Applied to the save as stored
     // now: another tab may have raced since this one loaded, and its coins and records must survive.
-    outcome = { result, save: recordRaceResult(app, result) };
+    outcome = { result, save: recordRaceResult(app, result, app.save.selectedCar) };
     // Sent while the «Финиш!» toast plays; the results screen shows the place when it arrives.
     placement = app.leaderboard?.recordFinish() ?? null;
     // Every bot's final points for the HUD and the results; the ghosts fade out where they are.

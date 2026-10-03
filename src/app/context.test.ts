@@ -3,6 +3,7 @@ import { DEFAULT_SAVE, SAVE_KEY, loadSave } from '../core/save';
 import type { RaceResult, SaveData } from '../shared/types';
 import { SMALL_BUFFER, bufferSize, createApp, pixelRatioOf, testFlagsFrom, watchPixelRatio, type App, type AppDeps } from './context';
 import { recordRaceResult } from './saveResult';
+import { purchaseCar } from './carShop';
 
 describe('bufferSize', () => {
   it('uses the canvas size outside small test mode', () => {
@@ -182,8 +183,8 @@ describe('save shared between tabs', () => {
     const a = openTab(t1.storage, t1.events);
     const b = openTab(t2.storage, t2.events);
     browser.hold();
-    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }));
-    const out = recordRaceResult(a, race({ coinsEarned: 25, totalPoints: 5000, bestLap: 66 }));
+    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }), 'iskra');
+    const out = recordRaceResult(a, race({ coinsEarned: 25, totalPoints: 5000, bestLap: 66 }), 'iskra');
     expect(browser.stored()).toMatchObject({ coins: 65, bestScore: 9000, bestLapMs: 64_000 });
     expect(a.save).toMatchObject({ coins: 65, bestScore: 9000, bestLapMs: 64_000 });
     // Records are judged against the stored save: tab B's 9000 / 64 s already beat this run.
@@ -198,7 +199,7 @@ describe('save shared between tabs', () => {
     const a = openTab(t1.storage, t1.events);
     const b = openTab(t2.storage, t2.events);
     browser.hold();
-    recordRaceResult(b, race({ coinsEarned: 40 }));
+    recordRaceResult(b, race({ coinsEarned: 40 }), 'iskra');
     a.setMuted(true);
     expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, muted: true });
     a.setQuality('high');
@@ -211,14 +212,28 @@ describe('save shared between tabs', () => {
     const t2 = browser.tab();
     const a = openTab(t1.storage, t1.events);
     const b = openTab(t2.storage, t2.events);
-    recordRaceResult(b, race({ coinsEarned: 40 }));
+    recordRaceResult(b, race({ coinsEarned: 40 }), 'iskra');
     a.setGhosts(false);
     expect(a.save.ghosts).toBe(false);
     expect(browser.stored()).toMatchObject({ coins: 40, bestScore: 5000, ghosts: false });
     // Another tab's toggle does not flip this tab's setting; its own progress still arrives.
     b.setGhosts(true);
-    recordRaceResult(b, race({ coinsEarned: 2 }));
+    recordRaceResult(b, race({ coinsEarned: 2 }), 'iskra');
     expect(a.save).toMatchObject({ coins: 42, ghosts: false });
+  });
+
+  it('a car bought in another tab reaches this tab and its save listeners', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    const a = openTab(t1.storage, t1.events);
+    const b = openTab(t2.storage, t2.events);
+    recordRaceResult(b, race({ coinsEarned: 400 }), 'iskra');
+    const seen: string[][] = [];
+    a.onSaveChanged((s) => seen.push([...s.ownedCars]));
+    purchaseCar(b, 'quadro');
+    expect(a.save).toMatchObject({ coins: 100, ownedCars: ['iskra', 'quadro'], selectedCar: 'quadro' });
+    expect(seen.at(-1)).toEqual(['iskra', 'quadro']);
   });
 
   it('a quality override (test mode) is never persisted', () => {
@@ -237,7 +252,7 @@ describe('save shared between tabs', () => {
     const b = openTab(t2.storage, t2.events);
     const seen: SaveData[] = [];
     const off = a.onSaveChanged((s) => seen.push({ ...s }));
-    recordRaceResult(b, race({ coinsEarned: 40 }));
+    recordRaceResult(b, race({ coinsEarned: 40 }), 'iskra');
     expect(a.save).toMatchObject({ coins: 40, bestScore: 5000, bestLapMs: 66_000 });
     expect(seen).toEqual([a.save]);
     // Settings are per tab while it runs (its audio / renderer state); progress is shared.
@@ -248,7 +263,7 @@ describe('save shared between tabs', () => {
     a.setMuted(false);
     expect(browser.stored()).toMatchObject({ coins: 40, muted: false });
     off();
-    recordRaceResult(b, race({ coinsEarned: 1 }));
+    recordRaceResult(b, race({ coinsEarned: 1 }), 'iskra');
     expect(a.save.coins).toBe(41);
     expect(seen.length).toBe(1);
   });
@@ -260,16 +275,16 @@ describe('save shared between tabs', () => {
     // main.ts reads the save at boot, then loads for seconds before createApp() can listen for 'storage'.
     const bootSnapshot = loadSave(t1.storage);
     const b = openTab(t2.storage, t2.events);
-    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }));
+    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }), 'iskra');
     b.setMuted(true);
     const a = openTab(t1.storage, t1.events, false, bootSnapshot);
     expect(a.save).toMatchObject({ coins: 40, bestScore: 9000, bestLapMs: 64_000 });
     // This tab keeps the settings it booted with (its renderer and audio already use them).
     expect(a.save.muted).toBe(false);
     // Its own next write builds on the stored progress, and later writes still arrive.
-    recordRaceResult(a, race({ coinsEarned: 5 }));
+    recordRaceResult(a, race({ coinsEarned: 5 }), 'iskra');
     expect(browser.stored().coins).toBe(45);
-    recordRaceResult(b, race({ coinsEarned: 1 }));
+    recordRaceResult(b, race({ coinsEarned: 1 }), 'iskra');
     expect(a.save.coins).toBe(46);
   });
 
@@ -278,7 +293,7 @@ describe('save shared between tabs', () => {
     const t1 = browser.tab();
     const t2 = browser.tab();
     const a = openTab(t1.storage, t1.events);
-    recordRaceResult(a, race({ coinsEarned: 12 }));
+    recordRaceResult(a, race({ coinsEarned: 12 }), 'iskra');
     const changed = vi.fn();
     a.onSaveChanged(changed);
     t2.storage.setItem('other.key', '1');
@@ -297,8 +312,8 @@ describe('save shared between tabs', () => {
       },
     } as unknown as Storage;
     const a = openTab(full, new EventTarget());
-    recordRaceResult(a, race({ coinsEarned: 10 }));
-    recordRaceResult(a, race({ coinsEarned: 5 }));
+    recordRaceResult(a, race({ coinsEarned: 10 }), 'iskra');
+    recordRaceResult(a, race({ coinsEarned: 5 }), 'iskra');
     expect(a.save.coins).toBe(22);
     // Once writes work again the stored save catches up with this tab.
     full.setItem = (k: string, v: string) => void map.set(k, v);
@@ -308,9 +323,9 @@ describe('save shared between tabs', () => {
 
   it('without storage, progress still accumulates in memory', () => {
     const a = openTab(null, new EventTarget());
-    recordRaceResult(a, race({ coinsEarned: 10 }));
+    recordRaceResult(a, race({ coinsEarned: 10 }), 'iskra');
     a.setMuted(true);
-    recordRaceResult(a, race({ coinsEarned: 5 }));
+    recordRaceResult(a, race({ coinsEarned: 5 }), 'iskra');
     expect(a.save).toMatchObject({ coins: 15, bestScore: 5000, muted: true });
   });
 });
