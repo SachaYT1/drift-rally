@@ -170,7 +170,7 @@ describe('procedural world objects', () => {
       expectWithin(front.max.y - front.min.y, 8.4, 0.05);
     });
 
-    it('front tyre is fat and covers the collider capsule of plaza.ts', () => {
+    it('front tyre is fat and the collider capsule of plaza.ts fits its slice at car height', () => {
       const cap = footprint('bicycle')[0];
       if (cap.type !== 'capsule') throw new Error('bicycle footprint must be a capsule');
       const tyre = unionBox(meshesTagged(bike, 'part', 'frontTyre'));
@@ -178,14 +178,18 @@ describe('procedural world objects', () => {
       const width = tyre.max.x - tyre.min.x;
       expect(width).toBeGreaterThanOrEqual(2.4);
       expect(width).toBeLessThanOrEqual(2 * cap.r + 0.1);
-      // Ground-plane extent of the tyre matches the capsule ends within a few decimetres.
-      expect(Math.abs(tyre.min.z - (cap.ax - cap.r))).toBeLessThan(0.4);
-      expect(Math.abs(tyre.max.z - (cap.bx + cap.r))).toBeLessThan(0.4);
-      // Every tyre vertex projects inside the capsule (the visible wheel is what the car hits); the
-      // tyre's round ends (r 4.2) may overhang the capsule ends by a few centimetres.
-      for (const v of vertices(bike, (m) => m.userData.part === 'frontTyre')) {
-        expect(capsuleDistance(v.x, v.z, cap)).toBeLessThanOrEqual(cap.r + 0.2);
-      }
+      // plaza.ts fits the capsule to the rubber the car can touch (<= ~1.5 m); the upper half of the
+      // r 4.2 tyre overhangs the car and must not widen the collider.
+      const slice = vertices(bike, (m) => m.userData.part === 'frontTyre').filter((v) => v.y <= 1.5);
+      expect(slice.length).toBeGreaterThan(0);
+      const zs = slice.map((v) => v.z);
+      // Road-side end: no collider beyond the visible rubber (and none of it left uncovered).
+      expect(Math.abs(Math.max(...zs) - (cap.bx + cap.r))).toBeLessThan(0.4);
+      // Barrier-side end covers the rubber; the capsule runs on through the barrier.
+      expect(cap.ax - cap.r).toBeLessThanOrEqual(Math.min(...zs));
+      // Every car-height tyre vertex projects inside the capsule (the visible wheel is what the car hits);
+      // the tyre's elliptic cross-section may bulge a few centimetres past the capsule radius.
+      for (const v of slice) expect(capsuleDistance(v.x, v.z, cap)).toBeLessThanOrEqual(cap.r + 0.15);
     });
 
     it('has a coral frame', () => {
