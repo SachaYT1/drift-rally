@@ -76,6 +76,18 @@ describe('HUD standings (jsdom)', () => {
     expect(items()).toHaveLength(3);
     st.update([row('player', 1)]);
     expect(items()).toHaveLength(1);
+    // The same rows again: the re-created items must be filled in.
+    st.update([row('player', 1), row('rookie', 0)]);
+    expect(items().map((e) => e.querySelector('.dr-standings__name')?.textContent)).toEqual(['Ты', 'Новичок']);
+  });
+
+  it('names the finish mark for screen readers only on finished rows', () => {
+    st.update([row('pro', 5, true), row('player', 1)]);
+    const [done, racing] = items().map((e) => e.querySelector('.dr-standings__done')!);
+    expect(done.getAttribute('role')).toBe('img');
+    expect(done.getAttribute('aria-label')).toBe('финишировал');
+    expect(racing.getAttribute('aria-label')).toBeNull();
+    expect(racing.getAttribute('aria-hidden')).toBe('true');
   });
 });
 

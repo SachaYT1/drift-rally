@@ -25,8 +25,11 @@ export interface GhostRun {
    * own teleport snaps its ghost (the player's respawn does not).
    */
   views(alpha: number, player: Readonly<CarState>, dt: number): readonly GhostView[];
-  /** Live standings (`player.points`: banked plus the running chain, like livePoints()). */
-  standings(player: { points: number; finished: boolean }): StandingRow[];
+  /**
+   * Live standings (`player.points`: banked plus the running chain, like livePoints()). The rows are reused
+   * by the next call.
+   */
+  standings(player: { points: number; finished: boolean }): readonly StandingRow[];
   /** Standings after finish(): every bot's result. */
   finalStandings(playerPoints: number): StandingRow[];
 }
@@ -35,6 +38,8 @@ export function createGhostRun(track: Track, roster: readonly BotDef[] = BOTS): 
   const field = createBotField(track, roster);
   let finished = false;
   const fades = field.bots.map(() => 1);
+  /** Live standings rows, reused by every HUD refresh. */
+  const live: StandingRow[] = [];
   const out: GhostView[] = field.bots.map((b) => ({
     car: { ...b.session.state().car },
     points: 0,
@@ -72,7 +77,7 @@ export function createGhostRun(track: Track, roster: readonly BotDef[] = BOTS): 
       return out;
     },
     standings(player) {
-      return standings(player, field.bots, false);
+      return standings(player, field.bots, false, live);
     },
     finalStandings(playerPoints) {
       return standings({ points: playerPoints, finished: true }, field.bots, true);

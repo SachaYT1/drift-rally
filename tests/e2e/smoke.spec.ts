@@ -143,6 +143,7 @@ test('garage -> race -> autopilot drive -> results', async ({ page }, info) => {
     expect(run.state.points, 'banked drift points').toBeGreaterThan(0);
     // Ghost bots are on by default: three bots race along, ranked with the player in the HUD.
     expect(run.state.bots.map((b) => b.id)).toEqual(['rookie', 'pro', 'master']);
+    expect(run.state.bots.some((b) => b.points > 0), 'the bots score too').toBe(true);
     await expect(page.locator('.dr-standings')).toBeVisible();
     await expect(page.locator('.dr-standings li')).toHaveCount(4);
     await frames(page);
@@ -178,6 +179,12 @@ test('garage -> race -> autopilot drive -> results', async ({ page }, info) => {
 });
 
 test('the garage switch turns the ghost bots off for the next race', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('console', (m) => {
+    const type = m.type();
+    if ((type === 'error' || type === 'warning') && !ALLOWED_CONSOLE.some((re) => re.test(m.text()))) problems.push(`[console.${type}] ${m.text()}`);
+  });
+  page.on('pageerror', (e) => problems.push(`[pageerror] ${e.message}`));
   await page.goto('./?test');
   const ghosts = page.locator('.dr-ghosts');
   await expect(ghosts).toHaveAttribute('aria-checked', 'true', { timeout: 120_000 });
@@ -195,4 +202,5 @@ test('the garage switch turns the ghost bots off for the next race', async ({ pa
   await page.evaluate(() => window.__game!.finish());
   await expect(page.locator('.dr-results')).toBeVisible();
   await expect(page.locator('.dr-versus')).toHaveCount(0);
+  expect(problems, 'console errors / warnings / page errors').toEqual([]);
 });

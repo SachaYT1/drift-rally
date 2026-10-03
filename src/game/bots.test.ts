@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { BOTS, BOT_TIME_CAP, PLAYER_NAME, createBotDriver, createBotField, livePoints, standings, type BotDef, type BotRun } from './bots';
 import { createSession, type Session } from './session';
 import { createAutopilot } from './autopilot';
@@ -46,11 +46,16 @@ describe('bot levels (calibration, spec §2.1 / §3.5)', () => {
     pro: [45_000, 55_000],
     master: [85_000, Infinity],
   };
-  const runs = BOTS.map((def) => ({ def, ...raceBot(def) }));
+  let runs: ({ def: BotDef } & ReturnType<typeof raceBot>)[] = [];
+  // In a hook, not at collection: the three races (~0.4 s) only run when this block does.
+  beforeAll(() => {
+    runs = BOTS.map((def) => ({ def, ...raceBot(def) }));
+  });
 
-  for (const r of runs) {
-    it(`${r.def.name} finishes all laps cleanly within its score range`, () => {
-      const [lo, hi] = RANGES[r.def.id];
+  for (const [i, def] of BOTS.entries()) {
+    it(`${def.name} finishes all laps cleanly within its score range`, () => {
+      const r = runs[i];
+      const [lo, hi] = RANGES[def.id];
       expect(r.st.phase).toBe('finished');
       expect(r.st.result?.lapTimes).toHaveLength(TUNING.race.laps);
       expect(r.respawns).toBe(0);
@@ -175,12 +180,29 @@ describe('standings', () => {
     ]);
   });
 
-  it('counts the running chain in the live points, not in the final ones', () => {
+  it('counts the running chain in the live points; the final points of a finished bot are its result', () => {
     expect(livePoints({ totalPoints: 100, chainPoints: 40 } as Parameters<typeof livePoints>[0])).toBe(140);
     const live = standings({ points: 120, finished: false }, [fakeRun(master, 100, null, 40)], false);
     expect(live.map((r) => [r.id, r.points])).toEqual([
       ['master', 140],
       ['player', 120],
+    ]);
+    const final = standings({ points: 120, finished: true }, [fakeRun(master, 100, 110, 40)], true);
+    expect(final.map((r) => [r.id, r.points])).toEqual([
+      ['player', 120],
+      ['master', 110],
+    ]);
+  });
+
+  it('writes into the rows it is given and reuses them', () => {
+    const out = standings({ points: 1, finished: false }, [fakeRun(rookie, 5, null)], false);
+    const objects = new Set(out);
+    const again = standings({ points: 9, finished: false }, [fakeRun(rookie, 5, null)], false, out);
+    expect(again).toBe(out);
+    expect(new Set(again)).toEqual(objects);
+    expect(again.map((r) => [r.id, r.points])).toEqual([
+      ['player', 9],
+      ['rookie', 5],
     ]);
   });
 

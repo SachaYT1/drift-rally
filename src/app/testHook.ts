@@ -11,6 +11,7 @@ import type { App, ScreenName } from './context';
 import type { RaceScreen } from './raceScreen';
 import type { InputSource } from './raceRun';
 import { createAutopilot } from '../game/autopilot';
+import { livePoints } from '../game/bots';
 
 export interface GameTestState {
   screen: ScreenName;
@@ -34,7 +35,10 @@ export interface GameTestState {
   time: number;
   paused: boolean;
   fps?: number;
-  /** Ghost bots of the run (banked points), in roster order; empty when switched off or no race. */
+  /**
+   * Ghost bots of the run in roster order, points as the HUD ranks them (banked plus the running chain: the
+   * master banks only at the finish); empty when switched off or no race.
+   */
   bots: { id: string; points: number; finished: boolean }[];
 }
 
@@ -144,7 +148,7 @@ export function installTestHook(target: HookTarget): GameTestHook {
         fps: a?.fps,
         bots: (r?.ghosts?.field.bots ?? []).map((b) => {
           const bs = b.session.state();
-          return { id: b.def.id, points: bs.score.totalPoints, finished: bs.phase === 'finished' };
+          return { id: b.def.id, points: livePoints(bs.score), finished: bs.phase === 'finished' };
         }),
       };
     },

@@ -35,7 +35,8 @@ multiplier, penalties), because each bot runs its own game session.
   and it fades in up to full ghost opacity at 14 m, so it never tints the player's car, piles labels on it or
   blocks the view. (Changed from "~0.1 within 8 m" after the first visual check: a ghost exactly on the player's
   car tinted it.)
-- Above each ghost a label: bot name in its colour and its current points, e.g. «Профи · 12 400».
+- Above each ghost a label: a dark pill with a dot and the bot name in its colour, then its current points in
+  white, e.g. «● Профи 12 400».
 - HUD: a standings block under the coin counter (top right): 4 rows sorted by current points (place, colour dot,
   name, points). The player's row reads «Ты» and is highlighted; a finished bot shows a ✓.
 - The player's respawn (R) and hits do not affect bots; pause freezes everyone.
@@ -90,7 +91,7 @@ All knobs are deterministic (no randomness). The exact knob set is settled durin
   points plus the running chain (`score.totalPoints + score.chainPoints`, for the player too: the master keeps
   one chain for the whole race, so banked points alone would show it at 0 until the finish); final standings
   use `result.totalPoints`. A bot cut off by the cap counts with
-  its points at the cap and is marked not finished.
+  its live points at the cap and is marked not finished.
 
 ### 3.4 Frame order
 
@@ -122,6 +123,10 @@ report the measured score and options to the user instead of silently lowering t
   `fade` (1 → 0 over 0.5 s) for finished bots and the player's finish.
 - Label: a `Sprite` with a `CanvasTexture` (name in the bot colour + points), `sizeAttenuation: false`, redrawn
   only when the rounded points change and at most 4 times per second; hidden beyond ~250 m.
+- Each ghost has its own pair of render orders (depth, colour), ranked far to near from the camera every frame,
+  so overlapping ghosts blend instead of the nearer depth pass cutting out the farther ghost.
+- Trade-off: transparents drawn earlier (tyre smoke, a faded occluder) that sit in front of a ghost are painted
+  over by it; drawing ghosts first would clip smoke and skid marks behind them instead.
 - Draw cost: 3 × 14 draw calls + 3 sprites.
 
 ### 4.2 Wiring
@@ -147,7 +152,8 @@ report the measured score and options to the user instead of silently lowering t
 
 ### 4.4 Test hook
 
-`window.__game.state()` adds `bots: { id, points, finished }[]` (empty when ghosts are off).
+`window.__game.state()` adds `bots: { id, points, finished }[]` (empty when ghosts are off); `points` as the HUD
+ranks them (banked plus the running chain).
 
 ## 5. Edge cases
 

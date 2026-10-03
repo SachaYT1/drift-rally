@@ -25,8 +25,17 @@ function innerHtml(r: StandingRow, place: number): string {
     `<span class="dr-standings__place dr-num">${place}</span><i class="dr-standings__dot" aria-hidden="true"></i>` +
     `<span class="dr-standings__name">${escapeHtml(r.name)}</span>` +
     `<b class="dr-standings__pts dr-num">${formatPoints(r.points)}</b>` +
-    `<span class="dr-standings__done" aria-label="финишировал">${r.finished ? '✓' : ''}</span>`
+    (r.finished
+      ? '<span class="dr-standings__done" role="img" aria-label="финишировал">✓</span>'
+      : '<span class="dr-standings__done" aria-hidden="true"></span>')
   );
+}
+
+/** What a row shows; a row is rewritten only when it changes. */
+interface Shown {
+  id: StandingRow['id'] | '';
+  points: number;
+  finished: boolean;
 }
 
 /** `<li>` rows for a static list (results screen). */
@@ -48,21 +57,26 @@ export function createStandings(parent: HTMLElement): Standings {
   list.className = 'dr-standings__list';
   box.appendChild(list);
   parent.appendChild(box);
-  /** Shown key per row (id, points, finished); '' forces the first write. */
-  const shown: string[] = [];
+  /** Per row; id '' forces the first write. */
+  const shown: Shown[] = [];
 
   return {
     update(rows) {
-      box.hidden = rows === null;
+      const hidden = rows === null;
+      if (box.hidden !== hidden) box.hidden = hidden;
       if (rows === null) return;
       while (list.children.length > rows.length) list.lastElementChild?.remove();
       while (list.children.length < rows.length) list.appendChild(document.createElement('li'));
-      shown.length = rows.length;
+      // Rows dropped and added back are new, empty items: forget what the old ones showed.
+      if (shown.length > rows.length) shown.length = rows.length;
+      while (shown.length < rows.length) shown.push({ id: '', points: 0, finished: false });
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const key = `${r.id}|${r.points}|${r.finished}`;
-        if (shown[i] === key) continue;
-        shown[i] = key;
+        const s = shown[i];
+        if (s.id === r.id && s.points === r.points && s.finished === r.finished) continue;
+        s.id = r.id;
+        s.points = r.points;
+        s.finished = r.finished;
         const li = list.children[i] as HTMLElement;
         li.className = classOf(r);
         li.style.setProperty('--c', colorOf(r));

@@ -122,7 +122,6 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     const frame = src(session.state());
     const actions = input.consumeActions();
     const events = session.step(frame, { respawn: actions.respawn }, dt);
-    ghosts?.step(dt);
     throttle = frame.throttle;
     if (!finished) simClock += dt;
     if (session.state().teleported) snapPending = true;
@@ -132,6 +131,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
       race.onEvent(e);
       if (e.type === 'finish') onFinish(e.result);
     }
+    // After the player's events (the finish saves first): the bots never come between the player and the save.
+    ghosts?.step(dt);
   }
 
   /**
@@ -187,13 +188,13 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   function onFinish(result: RaceResult): void {
     if (finished) return;
     finished = true;
-    // Every bot's final points for the HUD and the results; the ghosts fade out where they are.
-    ghosts?.finish();
     // Saved once, at the finish; quitting earlier forfeits (design spec §2.5). Applied to the save as stored
     // now: another tab may have raced since this one loaded, and its coins and records must survive.
     outcome = { result, save: recordRaceResult(app, result) };
     // Sent while the «Финиш!» toast plays; the results screen shows the place when it arrives.
     placement = app.leaderboard?.recordFinish() ?? null;
+    // Every bot's final points for the HUD and the results; the ghosts fade out where they are.
+    ghosts?.finish();
     audio.setEngineActive(false);
     hudTick(session.state(), 0, true);
     resultsTimer = window.setTimeout(showResultsNow, RESULTS_DELAY_MS);
@@ -207,6 +208,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     input.setRacing(false);
     hudLive = false;
     hud.destroy();
+    // The ghosts may not have faded yet (results shown at once by the test hook, or a hidden tab froze the fade).
+    race.hideGhosts();
     draw();
     resultsUi = showResults(
       ui,

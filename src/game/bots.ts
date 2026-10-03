@@ -88,34 +88,42 @@ export function livePoints(score: Readonly<DriftScoreState>): number {
   return score.totalPoints + score.chainPoints;
 }
 
-/** Roster position of a bot id: tied bots keep it. */
-function rosterIndex(id: StandingRow['id']): number {
-  return BOTS.findIndex((b) => b.id === id);
+/** Tie order: the player above the bots, the bots weakest first (roster order). */
+const TIE_ORDER: Readonly<Record<StandingRow['id'], number>> = { player: 0, rookie: 1, pro: 2, master: 3 };
+
+function byPoints(a: StandingRow, b: StandingRow): number {
+  return b.points - a.points || TIE_ORDER[a.id] - TIE_ORDER[b.id];
+}
+
+function setRow(r: StandingRow, id: StandingRow['id'], name: string, color: number | null, points: number, finished: boolean): void {
+  r.id = id;
+  r.name = name;
+  r.color = color;
+  r.points = Math.round(points);
+  r.finished = finished;
 }
 
 /**
- * Player and bots by points, best first. Live (`final` false): livePoints(); final: a finished bot's result.
- * `player.points` is the player's counterpart. Points are compared as shown (rounded); on a tie the player ranks
- * above the bots, and bots keep roster order.
+ * Player and bots by points, best first. Live (`final` false): livePoints(); final: a finished bot's result (a
+ * bot cut off by the time cap keeps its live points). `player.points` is the player's counterpart. Points are
+ * compared as shown (rounded); on a tie the player ranks above the bots, and bots keep roster order. Writes into
+ * `out` when given (the HUD refreshes 30 times a second: its rows are reused) and returns it.
  */
 export function standings(
   player: { points: number; finished: boolean },
   bots: readonly BotRun[],
   final: boolean,
+  out: StandingRow[] = [],
 ): StandingRow[] {
-  const rows: StandingRow[] = [
-    { id: 'player', name: PLAYER_NAME, color: null, points: Math.round(player.points), finished: player.finished },
-  ];
-  for (const b of bots) {
+  out.length = bots.length + 1;
+  for (let i = 0; i < out.length; i++) out[i] ??= { id: 'player', name: '', color: null, points: 0, finished: false };
+  setRow(out[0], 'player', PLAYER_NAME, null, player.points, player.finished);
+  for (let i = 0; i < bots.length; i++) {
+    const b = bots[i];
     const st = b.session.state();
     const finished = st.phase === 'finished';
     const points = final && finished && st.result ? st.result.totalPoints : livePoints(st.score);
-    rows.push({ id: b.def.id, name: b.def.name, color: b.def.color, points: Math.round(points), finished });
+    setRow(out[i + 1], b.def.id, b.def.name, b.def.color, points, finished);
   }
-  return rows.sort(
-    (a, b) =>
-      b.points - a.points ||
-      Number(b.id === 'player') - Number(a.id === 'player') ||
-      rosterIndex(a.id) - rosterIndex(b.id),
-  );
+  return out.sort(byPoints);
 }

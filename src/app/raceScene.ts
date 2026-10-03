@@ -64,6 +64,8 @@ export interface RaceScene {
   sync(f: RaceFrame, dt: number): void;
   /** Effects, props, camera shake and the car's bomb hop for one session event. */
   onEvent(e: GameEvent): void;
+  /** Hide the bots' ghosts until the next sync with ghosts (a still frame behind the results). */
+  hideGhosts(): void;
   setAspect(aspect: number): void;
   render(renderer: THREE.WebGLRenderer): void;
 }
@@ -150,6 +152,7 @@ export function createRaceScene(
     reset,
     sync,
     onEvent,
+    hideGhosts: () => ghosts.hide(),
     setAspect(aspect: number): void {
       if (!(aspect > 0) || camera.aspect === aspect) return;
       camera.aspect = aspect;
