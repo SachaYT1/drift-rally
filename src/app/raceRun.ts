@@ -25,6 +25,7 @@ import { inputOnPause, inputOnResume, type PauseCause } from './pauseInput';
 import type { RaceFrame } from './raceScene';
 import { bestLapSeconds, recordRaceResult, type SaveOutcome } from './saveResult';
 import { createGhostRun, type GhostRun } from './ghostRun';
+import { livePoints } from '../game/bots';
 
 /** Driving input for one fixed step. */
 export type InputSource = (st: Readonly<SessionState>) => InputFrame;
@@ -157,7 +158,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     if (force || hudAccum >= HUD_INTERVAL) {
       hudAccum = 0;
       const view = hudViewOf(st, hudView);
-      view.standings = ghosts ? ghosts.standings({ points: st.score.totalPoints, finished: st.phase === 'finished' }) : null;
+      view.standings = ghosts ? ghosts.standings({ points: livePoints(st.score), finished: st.phase === 'finished' }) : null;
       hud.update(view);
     }
     const hint = hintVisible(st);

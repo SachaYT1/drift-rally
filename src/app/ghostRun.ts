@@ -7,7 +7,7 @@
  */
 import type { CarState, StandingRow } from '../shared/types';
 import type { Track } from '../track/build';
-import { BOTS, createBotField, standings, type BotDef, type BotField } from '../game/bots';
+import { BOTS, createBotField, livePoints, standings, type BotDef, type BotField } from '../game/bots';
 import { ghostOpacity, type GhostView } from '../render/ghostCars';
 import { interpolateCar } from './interpolate';
 
@@ -22,7 +22,7 @@ export interface GhostRun {
   finish(): void;
   /** Ghost views for one render: `alpha` between the last two steps, `player` = the drawn player car. */
   views(alpha: number, snap: boolean, player: Readonly<CarState>, dt: number): readonly GhostView[];
-  /** Live standings (banked points). */
+  /** Live standings (`player.points`: banked plus the running chain, like livePoints()). */
   standings(player: { points: number; finished: boolean }): StandingRow[];
   /** Standings after finish(): every bot's result. */
   finalStandings(playerPoints: number): StandingRow[];
@@ -58,7 +58,7 @@ export function createGhostRun(track: Track, roster: readonly BotDef[] = BOTS): 
         if (!finished) {
           // A finished session no longer steps: draw its final pose, not a blend with the step before.
           interpolateCar(st.prevCar, st.car, done ? 1 : alpha, snap || st.teleported, v.car);
-          v.points = st.score.totalPoints;
+          v.points = livePoints(st.score);
         }
         if (finished || done) fades[i] = Math.max(0, fades[i] - dt / GHOST_FADE_TIME);
         v.opacity = ghostOpacity(Math.hypot(v.car.x - player.x, v.car.z - player.z), fades[i]);

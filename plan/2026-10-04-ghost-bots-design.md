@@ -87,7 +87,9 @@ All knobs are deterministic (no randomness). The exact knob set is settled durin
   - `bots()`: per bot `{ id, name, color, state }` for rendering and points.
 - `standings(player, bots)`: pure; rows `{ id, name, color, points, finished, isPlayer }` sorted by points
   descending; on a tie the player ranks above a bot, and bots keep roster order. Live standings use banked
-  points (`score.totalPoints`); final standings use `result.totalPoints`. A bot cut off by the cap counts with
+  points plus the running chain (`score.totalPoints + score.chainPoints`, for the player too: the master keeps
+  one chain for the whole race, so banked points alone would show it at 0 until the finish); final standings
+  use `result.totalPoints`. A bot cut off by the cap counts with
   its points at the cap and is marked not finished.
 
 ### 3.4 Frame order

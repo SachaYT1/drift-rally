@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { BOTS, BOT_TIME_CAP, PLAYER_NAME, createBotDriver, createBotField, standings, type BotDef, type BotRun } from './bots';
+import { BOTS, BOT_TIME_CAP, PLAYER_NAME, createBotDriver, createBotField, livePoints, standings, type BotDef, type BotRun } from './bots';
 import { createSession, type Session } from './session';
 import { createAutopilot } from './autopilot';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { TUNING } from '../shared/tuning';
 import { DT } from './testSession';
+import type { GameEvent } from '../shared/types';
 
 const track = buildTrack(PLAZA);
 
 /** A stand-in bot run: only the session state that standings() reads matters. */
-function fakeRun(def: BotDef, totalPoints: number, finalPoints: number | null): BotRun {
+function fakeRun(def: BotDef, totalPoints: number, finalPoints: number | null, chainPoints = 0): BotRun {
   const state = {
     phase: finalPoints === null ? 'racing' : 'finished',
-    score: { totalPoints },
+    score: { totalPoints, chainPoints },
     result: finalPoints === null ? null : { totalPoints: finalPoints },
   };
   return { def, session: { track, state: () => state, step: () => [] } as unknown as Session };
@@ -24,6 +25,45 @@ describe('bot roster', () => {
     expect(BOTS.map((b) => b.id)).toEqual(['rookie', 'pro', 'master']);
     expect(BOTS.map((b) => b.name)).toEqual(['Новичок', 'Профи', 'Мастер']);
     expect(new Set(BOTS.map((b) => b.color)).size).toBe(3);
+  });
+});
+
+/** One bot's whole race with its own style; the field drops events, so this loop counts them. */
+function raceBot(def: BotDef) {
+  const sess = createSession(track);
+  const drive = createBotDriver(track, def);
+  const events: GameEvent[] = [];
+  for (let i = 0; i < 400 / DT && sess.state().phase !== 'finished'; i++) {
+    events.push(...sess.step(drive(sess.state()), { respawn: false }, DT));
+  }
+  const count = (type: GameEvent['type']) => events.filter((e) => e.type === type).length;
+  return { st: sess.state(), hits: count('hit'), respawns: count('respawn') };
+}
+
+describe('bot levels (calibration, spec §2.1 / §3.5)', () => {
+  const RANGES: Record<string, [number, number]> = {
+    rookie: [20_000, 30_000],
+    pro: [45_000, 55_000],
+    master: [85_000, Infinity],
+  };
+  const runs = BOTS.map((def) => ({ def, ...raceBot(def) }));
+
+  for (const r of runs) {
+    it(`${r.def.name} finishes all laps cleanly within its score range`, () => {
+      const [lo, hi] = RANGES[r.def.id];
+      expect(r.st.phase).toBe('finished');
+      expect(r.st.result?.lapTimes).toHaveLength(TUNING.race.laps);
+      expect(r.respawns).toBe(0);
+      expect(r.hits).toBeLessThanOrEqual(2);
+      expect(r.st.result!.totalPoints).toBeGreaterThanOrEqual(lo);
+      expect(r.st.result!.totalPoints).toBeLessThanOrEqual(hi);
+    });
+  }
+
+  it('ranks the levels rookie < pro < master', () => {
+    const points = runs.map((r) => r.st.result!.totalPoints);
+    expect(points[0]).toBeLessThan(points[1]);
+    expect(points[1]).toBeLessThan(points[2]);
   });
 });
 
@@ -132,6 +172,15 @@ describe('standings', () => {
       ['pro', 700],
       ['player', 400],
       ['rookie', 250],
+    ]);
+  });
+
+  it('counts the running chain in the live points, not in the final ones', () => {
+    expect(livePoints({ totalPoints: 100, chainPoints: 40 } as Parameters<typeof livePoints>[0])).toBe(140);
+    const live = standings({ points: 120, finished: false }, [fakeRun(master, 100, null, 40)], false);
+    expect(live.map((r) => [r.id, r.points])).toEqual([
+      ['master', 140],
+      ['player', 120],
     ]);
   });
 

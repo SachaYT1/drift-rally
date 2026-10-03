@@ -8,6 +8,7 @@ import type { BotId, InputFrame, StandingRow } from '../shared/types';
 import type { Track } from '../track/build';
 import { AUTOPILOT, createAutopilot, type AutopilotStyle } from './autopilot';
 import { createSession, type Session, type SessionState } from './session';
+import type { DriftScoreState } from './driftScore';
 
 export interface BotDef {
   id: BotId;
@@ -21,12 +22,14 @@ export interface BotDef {
 
 /**
  * The levels, weakest first. Target scores over 3 laps of «Площадь» (spec §2.1, pinned by bots.test.ts):
- * rookie 20 000-30 000, pro 45 000-55 000, master >= 85 000.
+ * rookie 20 000-30 000 (24 777 on 2026-10-04: slower, short drifts that never link into a chain), pro
+ * 45 000-55 000 (51 365: the reference autopilot), master >= 85 000 (93 071: one chain from the first kick to
+ * the finish at the top multiplier).
  */
 export const BOTS: readonly BotDef[] = Object.freeze([
-  { id: 'rookie', name: 'Новичок', color: 0x3fd6a0, style: {} },
+  { id: 'rookie', name: 'Новичок', color: 0x3fd6a0, style: { throttleCap: 0.85, latShare: 0.75, linkDrifts: 0, maxDriftTime: 6.5 } },
   { id: 'pro', name: 'Профи', color: 0x4c8dff, style: {} },
-  { id: 'master', name: 'Мастер', color: 0xb070ff, style: {} },
+  { id: 'master', name: 'Мастер', color: 0xb070ff, style: { keepChain: 1, catchMargin: 0.04 } },
 ]);
 
 /** Name of the player's row in the standings. */
@@ -77,14 +80,23 @@ export function createBotField(track: Track, roster: readonly BotDef[] = BOTS, t
   };
 }
 
+/**
+ * Points a racer has right now: banked plus the running chain. A chain can still burn, but banked points alone
+ * would show a bot that keeps one chain for the whole race (the master) at 0 until the finish.
+ */
+export function livePoints(score: Readonly<DriftScoreState>): number {
+  return score.totalPoints + score.chainPoints;
+}
+
 /** Roster position of a bot id: tied bots keep it. */
 function rosterIndex(id: StandingRow['id']): number {
   return BOTS.findIndex((b) => b.id === id);
 }
 
 /**
- * Player and bots by points, best first. Live (`final` false): banked points; final: a finished bot's result.
- * Points are compared as shown (rounded); on a tie the player ranks above the bots, and bots keep roster order.
+ * Player and bots by points, best first. Live (`final` false): livePoints(); final: a finished bot's result.
+ * `player.points` is the player's counterpart. Points are compared as shown (rounded); on a tie the player ranks
+ * above the bots, and bots keep roster order.
  */
 export function standings(
   player: { points: number; finished: boolean },
@@ -97,7 +109,7 @@ export function standings(
   for (const b of bots) {
     const st = b.session.state();
     const finished = st.phase === 'finished';
-    const points = final && finished && st.result ? st.result.totalPoints : st.score.totalPoints;
+    const points = final && finished && st.result ? st.result.totalPoints : livePoints(st.score);
     rows.push({ id: b.def.id, name: b.def.name, color: b.def.color, points: Math.round(points), finished });
   }
   return rows.sort(

@@ -35,7 +35,7 @@ describe('ghost run', () => {
     const st = run.field.bots[0].session.state();
     expect(run.views(1, false, FAR, FRAME)[0].car.x).toBeCloseTo(st.car.x);
     expect(run.views(0, false, FAR, FRAME)[0].car.x).toBeCloseTo(st.prevCar.x);
-    expect(a[0].points).toBe(st.score.totalPoints);
+    expect(a[0].points).toBe(st.score.totalPoints + st.score.chainPoints);
     expect(a[0].visible).toBe(true);
     expect(a[0].opacity).toBeCloseTo(GHOST_OPACITY);
   });
