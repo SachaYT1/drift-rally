@@ -19,6 +19,7 @@ import type { App } from './context';
 import { interpolateCar } from './interpolate';
 import { hintVisible, hudViewOf, parkedCar } from './raceView';
 import { inputOnPause, inputOnResume, type PauseCause } from './pauseInput';
+import type { RaceFrame } from './raceScene';
 import { applyRaceResult, bestLapSeconds, type SaveOutcome } from './saveResult';
 
 /** Driving input for one fixed step. */
@@ -77,6 +78,16 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   let resultsUi: { destroy(): void } | null = null;
   const renderCar = { ...session.state().car };
   const parked = { ...renderCar };
+  // Reused every frame / HUD tick: the render loop allocates nothing per frame.
+  const frame: RaceFrame = {
+    car: renderCar,
+    effectsCar: renderCar,
+    surface: 'road',
+    pickups: session.state().pickups,
+    simTime: 0,
+    snap: true,
+  };
+  const hudView = hudViewOf(session.state());
 
   race.reset();
   const hud = createHud(ui, { onPause: () => pause('player') });
@@ -115,8 +126,13 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
    * mid-motion: camera and model keep that pose, but the tyre effects see it parked so smoke stops.
    */
   function syncVisuals(car: SessionState['car'], st: Readonly<SessionState>, dt: number): void {
-    const effectsCar = finished ? parkedCar(car, parked) : car;
-    race.sync({ car, effectsCar, surface: st.surface, pickups: st.pickups, simTime: simClock, snap: snapPending }, dt);
+    frame.car = car;
+    frame.effectsCar = finished ? parkedCar(car, parked) : car;
+    frame.surface = st.surface;
+    frame.pickups = st.pickups;
+    frame.simTime = simClock;
+    frame.snap = snapPending;
+    race.sync(frame, dt);
     snapPending = false;
     audio.update(car, throttle, car.mode === 'drift', dt);
   }
@@ -126,7 +142,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     hudAccum += dt;
     if (force || hudAccum >= HUD_INTERVAL) {
       hudAccum = 0;
-      hud.update(hudViewOf(st));
+      hud.update(hudViewOf(st, hudView));
     }
     const hint = hintVisible(st);
     if (hint !== hintShown) {

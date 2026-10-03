@@ -37,6 +37,16 @@ describe('hudViewOf after the finish', () => {
   });
 });
 
+describe('hudViewOf into a reused view', () => {
+  it('overwrites every field of `out` and returns it (no allocation per HUD tick)', () => {
+    const st = createSession(track, { bestLap: 61.5 }).state();
+    const out = hudViewOf({ ...st, time: 99, car: { ...st.car, speed: 12 } });
+    const again = hudViewOf(st, out);
+    expect(again).toBe(out);
+    expect(out).toEqual(hudViewOf(st));
+  });
+});
+
 describe('hintVisible', () => {
   const base = createSession(track).state();
   const at = (phase: SessionState['phase'], time: number): SessionState => ({ ...base, phase, time });
