@@ -61,25 +61,47 @@ interface WrongWayStep {
 }
 
 /**
- * Grace suppresses wrong-way; otherwise it is raised after progressSpeed stays below
- * `wrongWaySpeed` for more than `wrongWayTime`, and cleared once progressSpeed >= 0.
+ * Grace suppresses wrong-way; otherwise it is raised after progressSpeed stays below `wrongWaySpeed`
+ * with the body facing against the track for more than `wrongWayTime`, and cleared once progressSpeed
+ * >= 0 or the body faces along the track again. Plain reversing is not wrong-way.
  */
-function stepWrongWay(state: ProgressState, progressSpeed: number, dt: number, t: Tuning): WrongWayStep {
+function stepWrongWay(
+  state: ProgressState,
+  progressSpeed: number,
+  against: boolean,
+  dt: number,
+  t: Tuning,
+): WrongWayStep {
   const pt = t.progress;
   if (state.graceTimer > 0) {
     return { wrongWay: false, wrongWayTimer: 0, graceTimer: Math.max(0, state.graceTimer - dt) };
   }
-  if (progressSpeed < pt.wrongWaySpeed) {
+  if (progressSpeed < pt.wrongWaySpeed && against) {
     const wrongWayTimer = state.wrongWayTimer + dt;
     return { wrongWay: state.wrongWay || wrongWayTimer > pt.wrongWayTime, wrongWayTimer, graceTimer: 0 };
   }
-  return { wrongWay: state.wrongWay && progressSpeed < 0, wrongWayTimer: 0, graceTimer: 0 };
+  return { wrongWay: state.wrongWay && progressSpeed < 0 && against, wrongWayTimer: 0, graceTimer: 0 };
 }
 
+/**
+ * True when a body with `heading` faces against the driving direction at arc length s, i.e.
+ * cos(heading - track heading) < 0. Without a (finite) heading every car counts as facing against, so
+ * callers that pass none keep the progress-speed-only wrong-way rule.
+ */
+function facesAgainst(track: Track, s: number, heading: number | undefined): boolean {
+  if (heading === undefined || !isFiniteNumber(heading)) return true;
+  const tangent = track.sampleAt(s);
+  return Math.sin(heading) * tangent.tx + Math.cos(heading) * tangent.tz < 0;
+}
+
+/**
+ * Advance progress by one step. `car.heading` (rad, optional) is the body heading: with it, wrong-way is
+ * raised only while the body faces against the track, so reversing never shows it.
+ */
 export function updateProgress(
   state: ProgressState,
   track: Track,
-  car: { x: number; z: number; speed: number },
+  car: { x: number; z: number; speed: number; heading?: number },
   time: number,
   dt: number,
   laps: number,
@@ -120,7 +142,7 @@ export function updateProgress(
   }
   const finished = state.finished || lapsCompleted >= laps;
 
-  const ww = stepWrongWay(state, progressSpeed, dt, t);
+  const ww = stepWrongWay(state, progressSpeed, facesAgainst(track, proj.s, car.heading), dt, t);
   if (ww.wrongWay !== state.wrongWay) events.push({ type: 'wrongWay', active: ww.wrongWay });
 
   return {

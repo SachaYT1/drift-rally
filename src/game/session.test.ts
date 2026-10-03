@@ -114,6 +114,20 @@ function autopilot(sess: Session): InputFrame {
 }
 
 /** Steps until the race finishes (or maxSeconds); returns every event. */
+/**
+ * Turns the car around and drives it against the track: steers toward the reversed tangent, pulled back
+ * toward the centreline (facing against the track, +lateral lies on the car's right).
+ */
+function wrongWayDriver(sess: Session): InputFrame {
+  const st = sess.state();
+  const tangent = sess.track.sampleAt(st.progress.s);
+  const target = Math.atan2(-tangent.tx, -tangent.tz) + clamp(st.progress.lateral * 0.05, -0.4, 0.4);
+  const err = wrapAngle(target - st.car.heading);
+  // Creep through the U-turn (tight radius), then drive on.
+  const throttle = Math.abs(err) > 0.5 && st.car.speed > 4 ? 0 : 0.5;
+  return { ...NEUTRAL_INPUT, throttle, steer: clamp(err * 2, -1, 1) };
+}
+
 function race(sess: Session, maxSeconds = 400) {
   const events: GameEvent[] = [];
   for (let i = 0; i < maxSeconds / DT && sess.state().phase !== 'finished'; i++) {
@@ -220,8 +234,8 @@ describe('session: countdown and teleports', () => {
   it('respawn interpolates from the marker pose and clears an active wrong-way in the same step', () => {
     const sess = createSession(makeCircleTrack());
     runFor(sess, TUNING.race.countdown + 0.05, () => NEUTRAL_INPUT);
-    // Reverse along the track until wrong-way is raised.
-    const ev = runFor(sess, TUNING.car.reverseDelay + TUNING.progress.wrongWayTime + 2, () => ({ ...NEUTRAL_INPUT, brake: 1 }));
+    // Turn around and drive against the track until wrong-way is raised (reversing never raises it).
+    const ev = runFor(sess, TUNING.progress.wrongWayTime + 5, wrongWayDriver);
     expect(ev).toContainEqual({ type: 'wrongWay', active: true });
     expect(sess.state().progress.wrongWay).toBe(true);
 
@@ -233,6 +247,17 @@ describe('session: countdown and teleports', () => {
     const marker = sess.track.poseAt(sess.track.respawnMarkers[0], 0);
     expect(st.prevCar.speed).toBe(0);
     expect(Math.hypot(st.prevCar.x - marker.x, st.prevCar.z - marker.z)).toBeLessThan(1e-6);
+    expect(st.progress.wrongWay).toBe(false);
+  });
+
+  it('reversing along the track never shows wrong-way', () => {
+    const sess = createSession(makeCircleTrack());
+    runFor(sess, TUNING.race.countdown + 0.05, () => NEUTRAL_INPUT);
+    const ev = runFor(sess, TUNING.car.reverseDelay + TUNING.progress.wrongWayTime + 2, () => ({ ...NEUTRAL_INPUT, brake: 1 }));
+    const st = sess.state();
+    expect(st.progress.progressSpeed).toBeLessThan(TUNING.progress.wrongWaySpeed);
+    expect(st.progress.p).toBeLessThan(TUNING.progress.spawnOffset - 5);
+    expect(ev.filter((e) => e.type === 'wrongWay')).toEqual([]);
     expect(st.progress.wrongWay).toBe(false);
   });
 
