@@ -108,12 +108,15 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     }
   }
 
-  /** Visual state for `car` (interpolated or the latest step). */
-  function syncVisuals(car: Readonly<SessionState['car']>, st: Readonly<SessionState>, dt: number): void {
-    const shown = finished ? parkedCar(car, parked) : car;
-    race.sync({ car: shown, surface: st.surface, pickups: st.pickups, simTime: simClock, snap: snapPending }, dt);
+  /**
+   * Visual state for `car` (interpolated or the latest step). After the finish the session freezes the car
+   * mid-motion: camera and model keep that pose, but the tyre effects see it parked so smoke stops.
+   */
+  function syncVisuals(car: SessionState['car'], st: Readonly<SessionState>, dt: number): void {
+    const effectsCar = finished ? parkedCar(car, parked) : car;
+    race.sync({ car, effectsCar, surface: st.surface, pickups: st.pickups, simTime: simClock, snap: snapPending }, dt);
     snapPending = false;
-    audio.update(shown, throttle, shown.mode === 'drift', dt);
+    audio.update(car, throttle, car.mode === 'drift', dt);
   }
 
   function hudTick(st: Readonly<SessionState>, dt: number, force = false): void {

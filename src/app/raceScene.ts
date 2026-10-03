@@ -28,8 +28,10 @@ const CAR_CENTRE_Y = 0.6;
 
 /** One render state of the race. */
 export interface RaceFrame {
-  /** Car to draw (interpolated, or parked after the finish). */
+  /** Car to draw (interpolated render state). */
   car: CarState;
+  /** Car as seen by the tyre effects (e.g. parked after the finish); defaults to `car`. */
+  effectsCar?: CarState;
   surface: SurfaceKind;
   pickups: PickupState;
   /** Simulation clock for the coin animation, s (freezes while paused). */
@@ -92,7 +94,7 @@ export function createRaceScene(
     env.updateShadows(chase.target.x, chase.target.z);
     carCentre.set(c.x, CAR_CENTRE_Y, c.z);
     fader.update(camera, carCentre, dt);
-    fx.update(c, f.surface, dt);
+    fx.update(f.effectsCar ?? c, f.surface, dt);
     props.update(f.pickups, f.simTime, dt);
   }
 
