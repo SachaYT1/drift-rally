@@ -78,6 +78,15 @@ export function bufferSize(w: number, h: number, small: boolean): { width: numbe
   return { width: Math.max(1, Math.round(w * k)), height: Math.max(1, Math.round(h * k)) };
 }
 
+/** Make three re-evaluate the shader program of every material under `root` on its next use. */
+function refreshMaterials(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const m: unknown = (o as THREE.Mesh).material;
+    if (Array.isArray(m)) for (const x of m as THREE.Material[]) x.needsUpdate = true;
+    else if (m) (m as THREE.Material).needsUpdate = true;
+  });
+}
+
 export function createApp(d: AppDeps): App {
   let save = d.save;
   let quality = d.quality;
@@ -112,6 +121,13 @@ export function createApp(d: AppDeps): App {
       if (q === quality) return;
       quality = q;
       d.race.env.setQuality(q);
+      // The shadow toggle changes shader variants. The race sun's castShadow flips with it, but the garage key
+      // light's does not, so three would keep sampling a stale shadow map there: flag every material of both
+      // scenes for a program refresh and compile the new variants in the background.
+      for (const [scene, camera] of [[d.garage.scene, d.garage.camera], [d.race.scene, d.race.camera]] as const) {
+        refreshMaterials(scene);
+        d.renderer.compileAsync(scene, camera).catch((err: unknown) => console.warn('Shader precompile failed:', err));
+      }
       if (!d.qualityOverride) app.setSave({ ...save, quality: q });
       app.resize();
     },
