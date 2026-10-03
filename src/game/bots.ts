@@ -4,12 +4,10 @@
  * bots never interact with the player. Pure: no three.js, no DOM.
  */
 import { TUNING, type Tuning } from '../shared/tuning';
-import type { InputFrame } from '../shared/types';
+import type { BotId, InputFrame, StandingRow } from '../shared/types';
 import type { Track } from '../track/build';
 import { AUTOPILOT, createAutopilot, type AutopilotStyle } from './autopilot';
 import { createSession, type Session, type SessionState } from './session';
-
-export type BotId = 'rookie' | 'pro' | 'master';
 
 export interface BotDef {
   id: BotId;
@@ -48,16 +46,6 @@ export interface BotField {
   step(dt: number): void;
   /** Step every unfinished bot until it finishes or its race time reaches `capSeconds`. */
   fastForward(capSeconds?: number): void;
-}
-
-export interface StandingRow {
-  id: BotId | 'player';
-  name: string;
-  /** Bot colour; null for the player. */
-  color: number | null;
-  /** Whole points, rounded like the HUD shows them. */
-  points: number;
-  finished: boolean;
 }
 
 /** The autopilot of one level. */

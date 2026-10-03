@@ -242,6 +242,23 @@ export interface RaceResult {
 }
 
 // ---------------------------------------------------------------------------
+// Ghost bots (game/bots.ts -> HUD, results)
+// ---------------------------------------------------------------------------
+
+export type BotId = 'rookie' | 'pro' | 'master';
+
+/** One row of the player-vs-bots standings. */
+export interface StandingRow {
+  id: BotId | 'player';
+  name: string;
+  /** Bot colour (sRGB hex); null for the player. */
+  color: number | null;
+  /** Whole points, rounded like the HUD shows them. */
+  points: number;
+  finished: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
 

@@ -56,4 +56,46 @@ describe('results screen (jsdom)', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     screen.destroy();
   });
+
+  it('shows «Ты против ботов» with the player\'s place when the race had bots', () => {
+    const screen = showResults(
+      root,
+      RESULT,
+      {
+        newBest: false,
+        bestScore: 5000,
+        shareUrl: 'https://example.com/',
+        versus: [
+          { id: 'master', name: 'Мастер', color: 0xb070ff, points: 91000, finished: true },
+          { id: 'player', name: 'Ты', color: null, points: 4820, finished: true },
+          { id: 'pro', name: 'Профи', color: 0x4c8dff, points: 4000, finished: false },
+        ],
+      },
+      { onRetry: () => {}, onGarage: () => {} },
+    );
+    const block = root.querySelector<HTMLElement>('.dr-versus');
+    expect(block).not.toBeNull();
+    const text = (block!.textContent ?? '').replace(/\s+/g, ' ');
+    expect(text).toContain('Ты против ботов');
+    expect(text).toContain('Место: 2 из 3');
+    expect(block!.querySelectorAll('li')).toHaveLength(3);
+    expect(block!.querySelector('li.is-player .dr-standings__place')?.textContent).toBe('2');
+    // Under the stat tiles, above the coins.
+    const grid = root.querySelector('.dr-results__grid')!;
+    const earn = root.querySelector('.dr-earn')!;
+    expect(grid.compareDocumentPosition(block!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(block!.compareDocumentPosition(earn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    screen.destroy();
+  });
+
+  it('has no versus block without bots', () => {
+    const screen = showResults(
+      root,
+      RESULT,
+      { newBest: false, bestScore: 5000, shareUrl: 'https://example.com/', versus: null },
+      { onRetry: () => {}, onGarage: () => {} },
+    );
+    expect(root.querySelector('.dr-versus')).toBeNull();
+    screen.destroy();
+  });
 });
