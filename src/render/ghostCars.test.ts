@@ -77,7 +77,31 @@ describe('ghost layer', () => {
       expect(single(m).depthWrite).toBe(true);
       expect(single(m).transparent).toBe(true);
     }
-    expect(Math.max(...depth.map((m) => m.renderOrder))).toBeLessThan(Math.min(...colour.map((m) => m.renderOrder)));
+    // Each colour mesh draws right after its own depth twin.
+    for (const m of colour) expect(m.children[0]).toBeInstanceOf(THREE.Mesh);
+    for (const m of colour) expect((m.children[0] as THREE.Mesh).renderOrder).toBe(m.renderOrder - 1);
+  });
+
+  it('orders the ghosts far to near from the camera, so a ghost behind another blends through it', () => {
+    const layer = createGhostLayer();
+    layer.setRoster(ROSTER);
+    const orders = (): number[] =>
+      layer.group.children.map((g) => {
+        const colour = meshes(g).filter((m) => single(m).colorWrite !== false);
+        expect(new Set(colour.map((m) => m.renderOrder)).size).toBe(1);
+        return colour[0].renderOrder;
+      });
+    const camera = new THREE.Vector3(0, 10, 0);
+    // Ghost 0 nearest, ghost 2 farthest.
+    layer.update([view(0, 20), view(0, 40), view(0, 60)], 0, camera);
+    const [a, b, c] = orders();
+    expect(c).toBeLessThan(b);
+    expect(b).toBeLessThan(a);
+    // Ghost 0 drives off ahead: now it is the farthest and draws first; ghost 1 is the nearest.
+    layer.update([view(0, 80), view(0, 40), view(0, 60)], 1 / 60, camera);
+    const [a2, b2, c2] = orders();
+    expect(a2).toBeLessThan(c2);
+    expect(c2).toBeLessThan(b2);
   });
 
   it('paints each ghost in its colour', () => {

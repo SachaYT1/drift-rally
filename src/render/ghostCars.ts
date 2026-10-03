@@ -3,10 +3,14 @@
  * colours with a floating «name · points» label. No shadows, effects or env map.
  *
  * Translucency without the x-ray look (wheels and seats showing through the body): every mesh draws twice.
- * A depth-only pass (DEPTH_ORDER) writes the ghost's nearest surface into the depth buffer, then the colour
- * pass (COLOUR_ORDER, depthFunc LessEqual, no depth write) blends only that surface. Both passes are
- * transparent objects ordered after the world's transparents (occluders -10, skid marks -2, smoke -1), so the
- * opaque world is complete behind a ghost. Labels draw last, through everything, within LABEL_MAX_DISTANCE.
+ * A depth-only pass writes the ghost's nearest surface into the depth buffer (pushed back a hair with a polygon
+ * offset, so the colour pass passes LessEqual on any GPU), then the colour pass (no depth write) blends only that
+ * surface. Each ghost has its own pair of render orders from ORDER_BASE, re-ranked far to near every frame, so a
+ * ghost behind another one blends through it instead of being cut out by its depth pass. Ghosts draw after the
+ * world's transparents (occluders -10, decals -3, skid marks -2, smoke -1): everything behind a ghost shows through
+ * it; the trade-off is that smoke or a faded occluder in FRONT of a ghost is painted over by it (drawing ghosts
+ * first would clip smoke and skid marks behind them instead). Labels draw last, through everything, within
+ * LABEL_MAX_DISTANCE.
  */
 import * as THREE from 'three';
 import type { CarState } from '../shared/types';
@@ -26,9 +30,9 @@ export const GHOST_FADE_FAR = 14;
 /** Labels farther than this from the camera are hidden, m. */
 export const LABEL_MAX_DISTANCE = 250;
 
-const DEPTH_ORDER = 10;
-const COLOUR_ORDER = 11;
-const LABEL_ORDER = 12;
+/** Render orders: ghost k from the far end draws its depth pass at ORDER_BASE + 2k, its colour pass right after. */
+const ORDER_BASE = 10;
+const LABEL_ORDER = 100;
 /** Below this opacity a ghost is not drawn at all. */
 const MIN_VISIBLE_OPACITY = 0.01;
 /** Label: height above the ground (m), on-screen height (sizeAttenuation off: fraction of a unit at 1 m). */
@@ -76,8 +80,8 @@ interface Label {
   texture: THREE.CanvasTexture | null;
   name: string;
   color: string;
-  /** Points text on the canvas, and seconds since it was drawn. */
-  shown: string;
+  /** Whole points on the canvas (NaN: nothing drawn yet), and seconds since they were drawn. */
+  shown: number;
   sinceDraw: number;
 }
 
@@ -86,8 +90,14 @@ interface Ghost {
   model: CarModel;
   /** Colour-pass materials (opacity follows the view). */
   colourMats: THREE.Material[];
+  /** Colour-pass meshes; each has its depth twin as its only child. */
+  meshes: THREE.Mesh[];
   label: Label;
   opacity: number;
+  /** Depth-pass render order (colour = +1); -1 before the first ranking. */
+  order: number;
+  /** Squared distance to the camera this frame (ranking). */
+  camDist2: number;
 }
 
 function createLabel(name: string, color: number): Label {
@@ -108,10 +118,19 @@ function createLabel(name: string, color: number): Label {
   sprite.position.y = LABEL_Y;
   sprite.scale.set((LABEL_HEIGHT * LABEL_W) / LABEL_H, LABEL_HEIGHT, 1);
   sprite.center.set(0.5, 0);
-  return { sprite, material, ctx, texture, name, color: `#${new THREE.Color(color).getHexString()}`, shown: '', sinceDraw: Infinity };
+  return { sprite, material, ctx, texture, name, color: `#${new THREE.Color(color).getHexString()}`, shown: Number.NaN, sinceDraw: Infinity };
 }
 
-/** Rounded dark pill, colour dot + name in the bot colour, points in white. */
+/** Pill (two half circles; CanvasRenderingContext2D.roundRect is missing before Safari 16 / Firefox 112). */
+function pillPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const r = h / 2;
+  ctx.beginPath();
+  ctx.arc(x + r, y + r, r, Math.PI / 2, (3 * Math.PI) / 2);
+  ctx.arc(x + w - r, y + r, r, -Math.PI / 2, Math.PI / 2);
+  ctx.closePath();
+}
+
+/** Dark pill, colour dot + name in the bot colour, points in white. */
 function drawLabel(l: Label, points: string): void {
   const { ctx } = l;
   if (!ctx || !l.texture) return;
@@ -127,8 +146,7 @@ function drawLabel(l: Label, points: string): void {
   const h = 84;
   const y0 = LABEL_H - h - 4;
   ctx.fillStyle = 'rgba(20, 18, 24, 0.72)';
-  ctx.beginPath();
-  ctx.roundRect(x0, y0, w, h, h / 2);
+  pillPath(ctx, x0, y0, w, h);
   ctx.fill();
   const cy = y0 + h / 2;
   ctx.fillStyle = l.color;
@@ -142,8 +160,11 @@ function drawLabel(l: Label, points: string): void {
   l.texture.needsUpdate = true;
 }
 
-/** Turn a car model into a ghost: shadowless, cloned translucent colour materials, a depth-only twin per mesh. */
-function ghostify(model: CarModel, depthMat: THREE.Material): THREE.Material[] {
+/**
+ * Turn a car model into a ghost: shadowless, cloned translucent colour materials, a depth-only twin per mesh.
+ * Returns the colour materials and meshes.
+ */
+function ghostify(model: CarModel, depthMat: THREE.Material): { colourMats: THREE.Material[]; meshes: THREE.Mesh[] } {
   const clones = new Map<THREE.Material, THREE.Material>();
   const meshes: THREE.Mesh[] = [];
   model.root.traverse((o) => {
@@ -163,15 +184,23 @@ function ghostify(model: CarModel, depthMat: THREE.Material): THREE.Material[] {
     mesh.material = mat;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
-    mesh.renderOrder = COLOUR_ORDER;
     // A child keeps the mesh's transform (car meshes sit at identity inside their animated groups).
     const depth = new THREE.Mesh(mesh.geometry, depthMat);
     depth.name = 'ghost-depth';
-    depth.renderOrder = DEPTH_ORDER;
     depth.castShadow = false;
     mesh.add(depth);
   }
-  return [...clones.values()];
+  return { colourMats: [...clones.values()], meshes };
+}
+
+/** Give a ghost its depth-pass render order (colour pass right after it). */
+function setOrder(g: Ghost, order: number): void {
+  if (order === g.order) return;
+  g.order = order;
+  for (const m of g.meshes) {
+    m.renderOrder = order + 1;
+    m.children[0].renderOrder = order;
+  }
 }
 
 function setOpacity(g: Ghost, opacity: number): void {
@@ -185,7 +214,14 @@ function setOpacity(g: Ghost, opacity: number): void {
 export function createGhostLayer(): GhostLayer {
   const group = new THREE.Group();
   group.name = 'ghosts';
-  const depthMat = new THREE.MeshBasicMaterial({ colorWrite: false, transparent: true, depthWrite: true });
+  const depthMat = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    transparent: true,
+    depthWrite: true,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
   let ghosts: Ghost[] = [];
 
   function dispose(g: Ghost): void {
@@ -197,6 +233,19 @@ export function createGhostLayer(): GhostLayer {
     g.label.material.dispose();
   }
 
+  /** Render orders far to near among the visible ghosts (ties: roster order), without allocating. */
+  function rankByDistance(): void {
+    for (const g of ghosts) {
+      if (!g.root.visible) continue;
+      // Ghosts drawn before this one: the visible ones farther from the camera.
+      let farther = 0;
+      for (const o of ghosts) {
+        if (o !== g && o.root.visible && (o.camDist2 > g.camDist2 || (o.camDist2 === g.camDist2 && ghosts.indexOf(o) < ghosts.indexOf(g)))) farther++;
+      }
+      setOrder(g, ORDER_BASE + 2 * farther);
+    }
+  }
+
   return {
     group,
     setRoster(defs) {
@@ -206,7 +255,7 @@ export function createGhostLayer(): GhostLayer {
       }
       ghosts = defs.map((d) => {
         const model = createCarModel(d.color);
-        const colourMats = ghostify(model, depthMat);
+        const { colourMats, meshes } = ghostify(model, depthMat);
         const root = new THREE.Group();
         root.name = `ghost-${d.name}`;
         root.visible = false;
@@ -214,8 +263,9 @@ export function createGhostLayer(): GhostLayer {
         const label = createLabel(d.name, d.color);
         root.add(label.sprite);
         group.add(root);
-        const g: Ghost = { root, model, colourMats, label, opacity: -1 };
+        const g: Ghost = { root, model, colourMats, meshes, label, opacity: -1, order: -1, camDist2: 0 };
         setOpacity(g, GHOST_OPACITY);
+        setOrder(g, ORDER_BASE);
         return g;
       });
     },
@@ -240,15 +290,17 @@ export function createGhostLayer(): GhostLayer {
         const l = g.label;
         const dx = c.x - cameraPos.x;
         const dz = c.z - cameraPos.z;
-        l.sprite.visible = dx * dx + dz * dz <= LABEL_MAX_DISTANCE * LABEL_MAX_DISTANCE;
+        g.camDist2 = dx * dx + dz * dz;
+        l.sprite.visible = g.camDist2 <= LABEL_MAX_DISTANCE * LABEL_MAX_DISTANCE;
         l.sinceDraw += dt;
-        const text = formatPoints(v.points);
-        if (text !== l.shown && l.sinceDraw >= LABEL_REDRAW) {
-          l.shown = text;
+        const points = Math.round(v.points);
+        if (points !== l.shown && l.sinceDraw >= LABEL_REDRAW) {
+          l.shown = points;
           l.sinceDraw = 0;
-          drawLabel(l, text);
+          drawLabel(l, formatPoints(points));
         }
       }
+      rankByDistance();
     },
     hide() {
       // Cheap enough for every frame with the ghosts off; a ghost settles when it reappears (update()).
