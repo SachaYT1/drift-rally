@@ -19,12 +19,12 @@ const RESULT: RaceResult = {
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe.skipIf(!win)('results screen (jsdom)', () => {
+describe('results screen (jsdom)', () => {
   let root: HTMLElement;
   let now = 0;
 
   beforeEach(() => {
-    fakeAnimations(win!);
+    fakeAnimations(win);
     root = document.createElement('div');
     document.body.appendChild(root);
     now = 1000;

@@ -2,10 +2,10 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createPauseMenu } from './pause';
 import { installDom } from './domTestEnv';
 
-const win = await installDom();
+await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-describe.skipIf(!win)('pause menu (jsdom)', () => {
+describe('pause menu (jsdom)', () => {
   it('labels the preset «Качество графики» so the neuter options agree with it', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);

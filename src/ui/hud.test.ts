@@ -6,13 +6,13 @@ import { fakeAnimations, installDom, type FakeAnimation } from './domTestEnv';
 const win = await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-describe.skipIf(!win)('HUD (jsdom)', () => {
+describe('HUD (jsdom)', () => {
   let animations: FakeAnimation[] = [];
   let root: HTMLElement;
   let hud: Hud;
 
   beforeEach(() => {
-    animations = fakeAnimations(win!);
+    animations = fakeAnimations(win);
     root = document.createElement('div');
     document.body.appendChild(root);
     hud = createHud(root, { onPause: () => {} });

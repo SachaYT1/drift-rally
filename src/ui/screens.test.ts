@@ -21,10 +21,10 @@ describe('index.html boot placeholder', () => {
   });
 });
 
-const win = await installDom();
+await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-describe.skipIf(!win)('boot placeholder hand-over (jsdom)', () => {
+describe('boot placeholder hand-over (jsdom)', () => {
   function rootWithPlaceholder(): HTMLElement {
     const root = document.createElement('div');
     root.innerHTML = '<div class="dr-boot"><b>DRIFT RALLY</b></div>';

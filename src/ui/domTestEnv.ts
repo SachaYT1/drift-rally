@@ -1,9 +1,9 @@
 /**
  * Test-only helper (never imported by the app): installs a jsdom window as the globals the UI modules use.
  *
- * jsdom 27 loads ESM-only dependencies through require(), which Node enables by default from 22.12. On an
- * older Node the import fails with ERR_REQUIRE_ESM and installDom() resolves null, so DOM suites can
- * `describe.skipIf(!win)` instead of breaking the whole run (CI uses a current Node 22).
+ * jsdom is pinned to 26.x (package.json): 27 loads ESM-only dependencies through require(), which Node only
+ * enables by default from 22.12, so on Node 22.9 every DOM suite used to be skipped without a word. A jsdom
+ * that cannot load now rejects installDom(), and the suite's top-level await fails the test file loudly.
  */
 import { vi } from 'vitest';
 
@@ -30,13 +30,17 @@ const FUNCTIONS = ['getComputedStyle', 'requestAnimationFrame', 'cancelAnimation
 /** A string specifier keeps the bundler and the type checker out of it (jsdom ships no types). */
 const JSDOM_MODULE = 'jsdom';
 
-export async function installDom(): Promise<DomWindow | null> {
+const loadJsdom = (): Promise<unknown> => import(/* @vite-ignore */ JSDOM_MODULE);
+
+/** Installs a fresh jsdom window as the globals. Rejects (never skips) when jsdom cannot be loaded. */
+export async function installDom(load: () => Promise<unknown> = loadJsdom): Promise<DomWindow> {
   let mod: JsdomModule;
   try {
-    mod = (await import(/* @vite-ignore */ JSDOM_MODULE)) as JsdomModule;
+    mod = (await load()) as JsdomModule;
   } catch (err) {
-    if ((err as { code?: string }).code === 'ERR_REQUIRE_ESM') return null;
-    throw err;
+    throw new Error(`jsdom failed to load on Node ${process.version}; the DOM suites need it (pinned in package.json)`, {
+      cause: err,
+    });
   }
   const { window: win } = new mod.JSDOM('<!doctype html><html><body></body></html>', {
     pretendToBeVisual: true,

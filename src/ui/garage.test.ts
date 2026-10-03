@@ -12,7 +12,7 @@ const SAVE: SaveData = { version: 1, coins: 120, bestScore: 4200, bestLapMs: 61_
 
 const norm = (s: string | null): string => (s ?? '').replace(/\s+/g, ' ');
 
-describe.skipIf(!win)('garage UI (jsdom)', () => {
+describe('garage UI (jsdom)', () => {
   let root: HTMLElement;
   let ui: GarageUI;
   let onMute: ReturnType<typeof vi.fn<(m: boolean) => void>>;
@@ -23,7 +23,7 @@ describe.skipIf(!win)('garage UI (jsdom)', () => {
   }
 
   beforeEach(() => {
-    fakeAnimations(win!);
+    fakeAnimations(win);
     root = document.createElement('div');
     document.body.appendChild(root);
   });
@@ -124,7 +124,7 @@ describe.skipIf(!win)('garage UI (jsdom)', () => {
   });
 });
 
-describe.skipIf(!win)('enterGarage mute wiring (jsdom)', () => {
+describe('enterGarage mute wiring (jsdom)', () => {
   it('routes the garage sound toggle to app.setMuted', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
