@@ -68,11 +68,13 @@ export const CARS: Readonly<Record<CarId, CarSpec>> = {
     price: 300,
     stats: { speed: 72, accel: 80, handling: 84, angle: 68 },
     tuning: {
-      // Gentle and wide: kicks from a lower speed, holds a wider angle, swings the body in more softly.
+      // Gentle and wide: kicks from a lower speed, holds a wider angle, swings the body in more softly and keeps
+      // its speed in the slide (less drag), which also carries it wide of the bomb by the bicycle.
       car: { maxSpeed: 38, engineAccel: 11.5 },
       drift: {
         minSpeed: 7,
         kickSteerThreshold: 0.18,
+        dragSlip: 5,
         slipNarrow: 16 * DEG,
         slipMid: 32 * DEG,
         slipWide: 47 * DEG,

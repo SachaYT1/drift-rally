@@ -24,6 +24,11 @@
   | Ронин | 900 | 60 695 (+18 %) | **157.5 s** (fastest) |
   | Скарабей | 2000 | 66 535 (+30 %) | 173.9 s |
 
+  Re-measured after rebasing onto v0.4.0 (bombs on the drift lines): Квадро's wide, slow line swept over the bomb
+  by the bicycle (2 bombs, 2 burned chains, 44 082 points). `dragSlip: 5` (it keeps its speed in the slide)
+  carries it wide of the bomb: Искра 51 871 / 175.3 s, Квадро 54 929 (+6 %) / 175.0 s, Ронин 60 785 / 158.0 s,
+  Скарабей 66 535 / 174.2 s, no bombs blown.
+
   A full autopilot race earns ~100 coins, so the prices mean ~3–6, then ~6–9, then ~11–20 more races.
 - **Save:** stays `version: 1`; the new fields are additive with defaults. Bumping the version would make an open old tab read "other version" → defaults and overwrite the coins.
 - **Friends table:** one table; each player's row shows the car of their best score (`best_car` column, `p_car` RPC argument). The migration is applied to the live project **only after the user confirms** (Task 14), and before the client ships.

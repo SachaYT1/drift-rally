@@ -1,8 +1,8 @@
 /**
  * Line-up balance (src/shared/cars.ts): the autopilot drives a full race in every car. Every car must drive it
  * cleanly, pricier cars must score more (drift angle pays, raw speed does not), and Ронин keeps its niche: the
- * fastest race. Measured when written (2026-10-04): Искра 51 365 pts / 174.9 s, Квадро 54 847 / 180.6,
- * Ронин 60 695 / 157.5, Скарабей 66 535 / 173.9.
+ * fastest race. Measured with the bombs on the track (2026-10-04, v0.4.0): Искра 51 871 pts / 175.3 s,
+ * Квадро 54 929 / 175.0, Ронин 60 785 / 158.0, Скарабей 66 535 / 174.2; no car blows a bomb.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createAutopilot } from './autopilot';
