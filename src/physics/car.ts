@@ -30,6 +30,9 @@ export function createCarState(x: number, z: number, heading: number): CarState 
     exitAlign: 0,
     pathCurv: 0,
     entryCurv: 0,
+    entryAt: 0,
+    lineOffset: 0,
+    intoLatch: 0,
     // At rest: every derived field is 0 for any tuning, so the global TUNING is fine here.
     ...derive(heading, 0, 0, TUNING),
     rpm: 0,
@@ -95,6 +98,9 @@ export function stepCar(
     exitAlign: m.exitAlign,
     pathCurv: pathCurvature(ctx, motion),
     entryCurv: m.entryCurv,
+    entryAt: m.entryAt,
+    lineOffset: m.lineOffset,
+    intoLatch: m.intoLatch,
     ...derived,
     rpm: clamp(rpm, 0, 1),
   };

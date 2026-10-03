@@ -128,25 +128,64 @@ describe('car tuning: drift.*', () => {
     expect(run(fast, 1, script, hardBrakes, 'runoff')).toEqual(run(fast, 1, script, TUNING, 'runoff'));
   });
 
+  /**
+   * Path curvature (1/m) of each step of a kick from a straight line, wheel held into the turn (it counts as
+   * neutral: it only picks the side), Space held for `space` seconds.
+   */
+  const kickCurvatures = (t: Tuning, space: number, seconds = 1.5): number[] => {
+    let s: CarState = { ...moving(0, 22), steer: 1 };
+    const out: number[] = [];
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      const next = stepCar(s, inp({ throttle: 1, steer: 1, handbrake: i * DT < space, handbrakePressed: i === 0 }), 'road', DT, t);
+      out.push((Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT));
+      s = next;
+    }
+    return out;
+  };
+
   it('entryBlendTime sets how long a kick takes to bend the path to the drift target', () => {
-    /** Path curvature (1/m) of each step of a kick from a straight line, wheel and Space held into the turn. */
-    const kickCurvatures = (t: Tuning): number[] => {
-      let s: CarState = { ...moving(0, 22), steer: 1 };
-      const out: number[] = [];
-      for (let i = 0; i < Math.round(1 / DT); i++) {
-        const next = stepCar(s, inp({ throttle: 1, steer: 1, handbrake: true, handbrakePressed: i === 0 }), 'road', DT, t);
-        out.push((Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT));
-        s = next;
-      }
-      return out;
-    };
-    const target = TUNING.drift.curvInto * TUNING.drift.handbrakeCurvBoost;
-    const at = (t: Tuning, seconds: number): number => kickCurvatures(t)[Math.round(seconds / DT) - 1] / target;
+    // The line hold off (entryHoldTime 0) and Space held: the target is curvNeutral x handbrakeCurvBoost.
+    const target = TUNING.drift.curvNeutral * TUNING.drift.handbrakeCurvBoost;
+    const at = (t: Tuning, seconds: number): number =>
+      kickCurvatures({ ...t, drift: { ...t.drift, entryHoldTime: 0 } }, Infinity)[Math.round(seconds / DT) - 1] / target;
     const T = TUNING.drift.entryBlendTime;
     expect(at(withDrift({ entryBlendTime: 0 }), DT)).toBeCloseTo(1, 9);
     expect(at(TUNING, DT)).toBeLessThan(0.01);
     expect(at(TUNING, T)).toBeCloseTo(1, 9);
     expect(at(withDrift({ entryBlendTime: 2 * T }), T)).toBeCloseTo(0.5, 2);
+  });
+
+  it('entryHoldTime sets how long a kick holds the line before the neutral drift arc', () => {
+    // From a straight line: the neutral arc eases from 0 to curvNeutral (Space tapped on the first step only).
+    const at = (t: Tuning, seconds: number): number =>
+      kickCurvatures(t, DT)[Math.round(seconds / DT) - 1] / TUNING.drift.curvNeutral;
+    const T = TUNING.drift.entryHoldTime;
+    const blended = TUNING.drift.entryBlendTime + 0.05;
+    expect(at(withDrift({ entryHoldTime: 0 }), blended)).toBeCloseTo(1, 9);
+    expect(at(TUNING, blended)).toBeLessThan(0.5);
+    expect(at(TUNING, T)).toBeCloseTo(1, 9);
+    expect(at(withDrift({ entryHoldTime: 2 * T }), T)).toBeCloseTo(0.5, 2);
+  });
+
+  it('flickBlendTime sets how long a flick takes to bend the path to the new side', () => {
+    /** Path curvature (1/m, + = left) `seconds` into a flick out of a settled left drift, the new key held. */
+    const at = (t: Tuning, seconds: number): number => {
+      let s = last(run(leftDrift(), TUNING.drift.entryHoldTime, () => inp({ throttle: 1 }), t));
+      let k = 0;
+      for (let i = 0; i < Math.round(seconds / DT); i++) {
+        const next = stepCar(s, inp({ throttle: 1, steer: -1, handbrake: i === 0, handbrakePressed: i === 0 }), 'road', DT, t);
+        k = (Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT);
+        s = next;
+      }
+      expect(s.driftDir).toBe(-1);
+      return k;
+    };
+    const T = TUNING.drift.flickBlendTime;
+    const n = TUNING.drift.curvNeutral;
+    expect(at(withDrift({ flickBlendTime: 0 }), 2 * DT)).toBeCloseTo(-n, 9);
+    expect(at(TUNING, DT)).toBeGreaterThan(0.9 * n);
+    expect(at(TUNING, T + DT)).toBeCloseTo(-n, 9);
+    expect(at(withDrift({ flickBlendTime: 2 * T }), T + DT)).toBeCloseTo(0, 2);
   });
 
   it('curvCounter sets the path curvature at full counter-steer', () => {

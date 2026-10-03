@@ -55,9 +55,12 @@ export const TUNING = {
     slipMax: 55 * DEG,
     /**
      * Path curvature (1/m) when steering into the drift / neutral / counter-steering. Full counter-steer
-     * (negative: a slight OUTWARD curve) widens a line that is too tight while the car keeps sliding.
+     * (negative: a slight OUTWARD curve) widens a line that is too tight while the car keeps sliding. The
+     * into arc is only as tight as a keyboard tap can take back (a 1/20 tap swung the heading ~20 deg in on a
+     * wide sweeper). The steer held through a kick or flick does not count as into-steer (CarState.intoLatch);
+     * into-steer follows the wheel in but lets go with the key.
      */
-    curvInto: 1 / 20,
+    curvInto: 1 / 28,
     curvNeutral: 1 / 38,
     curvCounter: -1 / 150,
     /** Path curvature multiplier while Space is held in a drift (tighter arc). */
@@ -67,6 +70,13 @@ export const TUNING = {
      * drift target (smoothstep). The kick swings the body into the slide at once without yanking the path.
      */
     entryBlendTime: 0.4,
+    /**
+     * The kick holds the line: seconds over which the neutral drift arc eases (smoothstep) from the path the
+     * car had in grip to curvNeutral, so a kick on a wide sweeper does not tuck in before the player reacts.
+     */
+    entryHoldTime: 1.3,
+    /** Seconds over which a flick bends the path from the one the car is on to the new side (smoothstep). */
+    flickBlendTime: 0.3,
     handbrakeDecel: 3,
     /** Body yaw tracking toward (velocity heading + target slip). */
     bodyResponse: 8,

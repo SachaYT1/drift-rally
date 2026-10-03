@@ -9,13 +9,16 @@ import { integrateLongitudinal, type Motion, type StepContext } from './carConte
 
 /** Mode-machine result: the mode fields plus the physics memory, always present. */
 export type ModeStep = Pick<CarState, 'mode' | 'driftDir' | 'driftTime' | 'gripBlend' | 'modeTimer'> &
-  Required<Pick<CarState, 'flickArm' | 'catchTimer' | 'exitAlign' | 'entryCurv'>>;
+  Required<
+    Pick<CarState, 'flickArm' | 'catchTimer' | 'exitAlign' | 'entryCurv' | 'entryAt' | 'lineOffset' | 'intoLatch'>
+  >;
 
 /** 3. Mode state machine. */
 export function nextMode(s: CarState, c: StepContext): ModeStep {
   const d = c.t.drift;
   // A Space press arms a flick for flickWindow seconds; the kick or flick it triggers consumes it.
   const armLeft = Math.max(0, (s.flickArm ?? 0) - c.dt);
+  const drifting = s.mode === 'drift';
   const cur: ModeStep = {
     mode: s.mode,
     driftDir: s.driftDir,
@@ -26,7 +29,11 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
     catchTimer: 0,
     // The exit phase runs in grip mode only; a heavy hit (recover) ends it.
     exitAlign: s.mode === 'grip' ? Math.max(0, (s.exitAlign ?? 0) - c.dt) : 0,
-    entryCurv: s.mode === 'drift' ? (s.entryCurv ?? 0) : 0,
+    entryCurv: drifting ? (s.entryCurv ?? 0) : 0,
+    entryAt: drifting ? (s.entryAt ?? 0) : 0,
+    lineOffset: drifting ? (s.lineOffset ?? 0) : 0,
+    // The steer held through the last kick or flick follows the key down, never back up.
+    intoLatch: drifting ? Math.min(s.intoLatch ?? 0, Math.max(0, c.steerInput * s.driftDir)) : 0,
   };
   const braking = c.brake > 0;
 
@@ -48,9 +55,23 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
       Math.abs(c.steerInput) >= d.kickSteerThreshold;
     if (!kick) return cur;
     const driftDir = c.steerInput > 0 ? 1 : -1;
-    // Smooth entry: the drift path starts from the path the car is on (the last step's curvature).
-    const entryCurv = s.pathCurv ?? 0;
-    return { ...cur, mode: 'drift', driftDir, driftTime: 0, modeTimer: 0, flickArm: 0, exitAlign: 0, entryCurv };
+    // Smooth entry: the drift path starts from the path the car is on (the last step's curvature), and the
+    // neutral arc holds that line for a while; the steer held through the kick only picks the side.
+    const entryCurv = entryPath(s, c);
+    const lineOffset = clamp(entryCurv * driftDir, d.curvCounter, d.curvInto) - d.curvNeutral;
+    return {
+      ...cur,
+      mode: 'drift',
+      driftDir,
+      driftTime: 0,
+      modeTimer: 0,
+      flickArm: 0,
+      exitAlign: 0,
+      entryCurv,
+      entryAt: 0,
+      lineOffset,
+      intoLatch: c.steerInput * driftDir,
+    };
   }
 
   // Drift.
@@ -61,11 +82,18 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
     modeTimer = s.modeTimer + c.dt;
     if (modeTimer >= (braking ? d.brakeExitTime : d.exitDelay)) return exitDrift(cur, c);
   }
-  if (isFlick(s, c, armLeft > 0)) return { ...cur, driftDir: s.driftDir === 1 ? -1 : 1, modeTimer, flickArm: 0 };
+  if (isFlick(s, c, armLeft > 0)) {
+    // A flick bends the path from the one the car is on (flickBlendTime); its steer only picks the new side.
+    const driftDir = s.driftDir === 1 ? -1 : 1;
+    const intoLatch = Math.max(0, c.steerInput * driftDir);
+    const entryCurv = entryPath(s, c);
+    return { ...cur, driftDir, modeTimer, flickArm: 0, entryCurv, entryAt: s.driftTime, lineOffset: 0, intoLatch };
+  }
   // Catch: full counter-steer held with Space released ends the drift; any let-up restarts the hold. The hold
   // counts once the WHEEL (smoothed steer, which sets the path curvature) is at full counter-steer too, so a
-  // keyboard counter-steer first slides straight for catchTime (spec §2.3) instead of catching while the wheel
-  // is still swinging across, and a counter tap followed by Space is a flick, not a catch and a re-kick.
+  // keyboard counter-steer first slides on the slightly outward full-counter path for catchTime (spec §2.3)
+  // instead of catching while the wheel is still swinging across, and a counter tap followed by Space is a
+  // flick, not a catch and a re-kick.
   const countering =
     s.driftDir !== 0 &&
     !c.handbrake &&
@@ -88,6 +116,16 @@ function isFlick(s: CarState, c: StepContext, armed: boolean): boolean {
   return c.handbrakePressed || armed || crossing;
 }
 
+/**
+ * The path curvature a drift entry (kick or flick) starts from: the last step's, kept within the tightest
+ * drift arc (+-curvInto * handbrakeCurvBoost). Grip integration right after a wall-slide pivot can turn the
+ * velocity at r ~2 m; a kick then must not start the drift there.
+ */
+function entryPath(s: CarState, c: StepContext): number {
+  const cap = c.t.drift.curvInto * c.t.drift.handbrakeCurvBoost;
+  return clamp(s.pathCurv ?? 0, -cap, cap);
+}
+
 /** Entering grip from drift: the exit phase starts and lateral grip blends back in from gripDrift. */
 function exitDrift(cur: ModeStep, c: StepContext): ModeStep {
   return {
@@ -100,22 +138,38 @@ function exitDrift(cur: ModeStep, c: StepContext): ModeStep {
     catchTimer: 0,
     exitAlign: c.t.drift.exitAlignTime,
     entryCurv: 0,
+    entryAt: 0,
+    lineOffset: 0,
+    intoLatch: 0,
   };
 }
 
 /**
  * 5. Drift integration: the path curves, the body tracks velocity heading + target slip. The drift target
- * curvature (relative to driftDir) runs into > neutral > 0 > full counter (a slight outward curve). Smooth
- * entry: for entryBlendTime after the kick the path curvature blends (smoothstep) from the one the car had
- * in grip to that target, so the kick swings the body into the slide without yanking the path inward.
+ * curvature (relative to driftDir) runs into > neutral > 0 > full counter (a slight outward curve).
+ * - Into-steer: the wheel, but no more than the key (letting go stops the tightening at once instead of after
+ *   the wheel's return), minus the steer held through the last kick or flick (it only picked the side).
+ * - The kick holds the line: the neutral arc eases from the path the car had in grip to curvNeutral over
+ *   entryHoldTime, so a kick on a wide sweeper does not tuck in before the player can react.
+ * - Smooth entry: for entryBlendTime after the kick (flickBlendTime after a flick) the path curvature blends
+ *   (smoothstep) from the one the car was on to that target, so the kick swings the body into the slide
+ *   without yanking the path, and a flick swings it to the new side without a hook.
  */
-export function integrateDrift(c: StepContext, m: Pick<ModeStep, 'driftDir' | 'driftTime' | 'entryCurv'>): Motion {
+export function integrateDrift(
+  c: StepContext,
+  m: Pick<ModeStep, 'driftDir' | 'driftTime' | 'entryCurv' | 'entryAt' | 'lineOffset' | 'intoLatch'>,
+): Motion {
   const d = c.t.drift;
   const driftDir = m.driftDir;
   const u = c.steer * driftDir;
-  const baseCurv = u >= 0 ? lerp(d.curvNeutral, d.curvInto, u) : lerp(d.curvNeutral, d.curvCounter, -u);
+  const age = m.driftTime - m.entryAt + c.dt;
+  const neutral = d.curvNeutral + m.lineOffset * (1 - ease(age, d.entryHoldTime));
+  const into = Math.max(0, Math.min(u, c.steerInput * driftDir) - m.intoLatch);
+  const baseCurv = u >= 0 ? lerp(neutral, d.curvInto, into) : lerp(neutral, d.curvCounter, -u);
+  // The drift-highway balance reads the steer alone (from curvNeutral): the line hold is not counter-steer.
+  const steerCurv = u >= 0 ? lerp(d.curvNeutral, d.curvInto, into) : lerp(d.curvNeutral, d.curvCounter, -u);
   const target = driftDir * baseCurv * (c.handbrake ? d.handbrakeCurvBoost : 1);
-  const blend = d.entryBlendTime > 0 ? smoothstep((m.driftTime + c.dt) / d.entryBlendTime) : 1;
+  const blend = ease(age, m.entryAt > 0 ? d.flickBlendTime : d.entryBlendTime);
   const curvature = blend < 1 ? lerp(m.entryCurv, target, blend) : target;
   const baseSlip = u >= 0 ? lerp(d.slipMid, d.slipWide, u) : lerp(d.slipMid, d.slipNarrow, -u);
   const targetSlip = Math.min(baseSlip + (c.handbrake ? d.handbrakeExtraSlip : 0), d.slipMax);
@@ -129,7 +183,7 @@ export function integrateDrift(c: StepContext, m: Pick<ModeStep, 'driftDir' | 'd
     c.surf.dragExtra -
     (c.handbrake ? d.handbrakeDecel : 0) -
     d.brakeFactor * c.t.car.brakeDecel * c.brake +
-    d.thrust * c.throttle * driftThrustScale(c, baseCurv);
+    d.thrust * c.throttle * driftThrustScale(c, steerCurv);
   const speed = Math.max(0, capDriftSpeed(c.speed, c.speed + accel * c.dt, d.maxSpeedFactor * c.surf.maxSpeed, c));
 
   // Body: rate-limited tracking of (velocity heading + target slip), on top of the path rotation.
@@ -143,6 +197,11 @@ export function integrateDrift(c: StepContext, m: Pick<ModeStep, 'driftDir' | 'd
 function smoothstep(x: number): number {
   const k = clamp(x, 0, 1);
   return k * k * (3 - 2 * k);
+}
+
+/** Smoothstep progress `age` seconds into an ease of `span` seconds (done at once for a span of 0). */
+function ease(age: number, span: number): number {
+  return span > 0 ? smoothstep(age / span) : 1;
 }
 
 /**
