@@ -282,6 +282,23 @@ describe('garage UI (jsdom)', () => {
       expect(document.activeElement).toBe(q('[data-ref="cancel"]'));
     });
 
+    it('keeps the buy dialog in step with the wallet while it is open', () => {
+      const save: SaveData = { ...SAVE, coins: 500 };
+      mountCars(save);
+      keydown('ArrowRight');
+      click(cta());
+      const confirm = (): HTMLButtonElement => q<HTMLButtonElement>('[data-confirm-buy]');
+      expect(norm(q('.dr-buy__text').textContent)).toContain('останется 200');
+      ui.update({ ...save, coins: 350 }); // another tab spent some coins
+      expect(norm(q('.dr-buy__text').textContent)).toContain('останется 50');
+      expect(confirm().disabled).toBe(false);
+      ui.update({ ...save, coins: 100 });
+      expect(norm(q('.dr-buy__text').textContent)).toContain('Не хватает 200 монет');
+      expect(confirm().disabled).toBe(true);
+      ui.update({ ...save, coins: 100, ownedCars: ['iskra', 'quadro'] }); // bought in another tab
+      expect(root.querySelector('.dr-modal')).toBeNull();
+    });
+
     it('opens on `initialCar` when given (test preview)', () => {
       mountCars(SAVE, 'scarab');
       expect(q('.dr-car__name').textContent).toBe('Скарабей');

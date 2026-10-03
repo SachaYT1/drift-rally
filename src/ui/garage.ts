@@ -8,7 +8,7 @@ import { TUNING } from '../shared/tuning';
 import { CARS, type CarId } from '../shared/cars';
 import { formatPoints, formatTime, pluralRu } from './format';
 import { mountFriends, type FriendsView } from './leaderboardView';
-import { buyDialogHtml, carCountLabel, ctaState, statsHtml, stepCar } from './garageCar';
+import { buyDialogHtml, buyTextHtml, carCountLabel, ctaState, missingCoinsHtml, statsHtml, stepCar } from './garageCar';
 import { COIN_HTML, LOGO_HTML, createLayer, escapeHtml, isInteractiveTarget, isTextField, keyHtml, play, qs } from './screens';
 import { APP_VERSION } from '../shared/version';
 
@@ -26,8 +26,6 @@ const POP: Keyframe[] = [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }
 
 type ModalKind = 'rules' | 'records' | 'buy';
 const LAP_FORMS = ['круг', 'круга', 'кругов'] as const;
-/** «не хватает 1 монеты / 2 монет / 5 монет». */
-const COIN_FORMS = ['монеты', 'монет', 'монет'] as const;
 /** Title of the open modal (one at a time), referenced by its aria-labelledby. */
 const MODAL_TITLE_ID = 'dr-modal-title';
 const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -237,10 +235,7 @@ export function createGarageUI(
       ctaHint.innerHTML = `или ${keyHtml('Enter')} · ${keyHtml('←')}${keyHtml('→')} машины`;
     } else {
       ctaLabel.innerHTML = `Купить <span class="dr-cta__price">${COIN_HTML}${formatPoints(state.price)}</span>`;
-      ctaHint.innerHTML =
-        state.short > 0
-          ? `Не хватает ${COIN_HTML}<b class="dr-num">${formatPoints(state.short)}</b> ${pluralRu(state.short, COIN_FORMS)}`
-          : 'Машина останется в гараже навсегда';
+      ctaHint.innerHTML = state.short > 0 ? missingCoinsHtml(state.short) : 'Машина останется в гараже навсегда';
     }
   }
 
@@ -248,6 +243,18 @@ export function createGarageUI(
     browsed = stepCar(browsed, step);
     renderCar();
     opts.onBrowse?.(browsed);
+  }
+
+  /** An open buy dialog follows the save: bought meanwhile (another tab) closes it, else its line and button. */
+  function refreshBuy(): void {
+    if (modal?.kind !== 'buy') return;
+    if (isOwned(browsed)) {
+      closeModal();
+      return;
+    }
+    const spec = CARS[browsed];
+    qs(modal.body, '.dr-buy__text').innerHTML = buyTextHtml(spec, save.coins);
+    qs<HTMLButtonElement>(modal.body, '[data-confirm-buy]').disabled = save.coins < spec.price;
   }
 
   function confirmBuy(): void {
@@ -398,6 +405,7 @@ export function createGarageUI(
       save = next;
       render(prevCoins);
       renderCar();
+      refreshBuy();
     },
     destroy(): void {
       window.removeEventListener('keydown', onKey);
