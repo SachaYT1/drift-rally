@@ -73,8 +73,8 @@ export interface CarState {
   /** Seconds a recent Space press stays armed for a flick (tuning.drift.flickWindow), counting down. */
   flickArm?: number;
   /**
-   * Seconds full counter-steer (steer * driftDir <= -tuning.drift.catchSteer, Space released) has been held
-   * in the current drift; at tuning.drift.catchTime the car catches the slide and the drift ends.
+   * Seconds full counter-steer (input AND wheel: steer * driftDir <= -tuning.drift.catchSteer, Space released)
+   * has been held in the current drift; at tuning.drift.catchTime the car catches the slide and the drift ends.
    */
   catchTimer?: number;
   /**
@@ -82,6 +82,32 @@ export interface CarState {
    * direction of travel is kept. Set to tuning.drift.exitAlignTime by every drift exit, counting down.
    */
   exitAlign?: number;
+  /**
+   * Signed path curvature of the last step, 1/m (+ = turning left): the velocity-heading change per metre
+   * travelled, from the step's integration alone (collision responses not included). A kick or flick starts
+   * from it.
+   */
+  pathCurv?: number;
+  /**
+   * Signed path curvature (1/m, + = left) the car had at the drift's last entry: the kick, or the last flick
+   * (kept within +-tuning.drift.curvInto * handbrakeCurvBoost); 0 outside drift mode. The drift path
+   * curvature blends from it to the drift target over tuning.drift.entryBlendTime (kick) or flickBlendTime.
+   */
+  entryCurv?: number;
+  /** driftTime at the drift's last entry: 0 for the kick, the drift's age at the last flick; 0 outside drift. */
+  entryAt?: number;
+  /**
+   * The kick holds the line: path curvature (1/m, relative to driftDir) by which the neutral drift arc starts
+   * off curvNeutral, from the path the car had in grip (kept within [0, curvInto]); it eases out
+   * over tuning.drift.entryHoldTime. 0 after a flick and outside drift mode.
+   */
+  lineOffset?: number;
+  /**
+   * Steer (0..1 toward driftDir) held through the drift's last kick or flick. It only picked the side, so it
+   * does not count as into-steer; it follows the steer input down (never back up), so letting go clears it
+   * and a fresh press tightens the drift. 0 outside drift mode.
+   */
+  intoLatch?: number;
 
   // ---- Derived values, recomputed at the end of every step ----
   /** |v|, m/s */

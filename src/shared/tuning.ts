@@ -55,13 +55,38 @@ export const TUNING = {
     slipMax: 55 * DEG,
     /**
      * Path curvature (1/m) when steering into the drift / neutral / counter-steering. Full counter-steer
-     * (0) runs a straight line while the car keeps sliding.
+     * (negative: a slight OUTWARD curve) widens a line that is too tight while the car keeps sliding. The
+     * into arc is only as tight as a keyboard tap can take back (a 1/20 tap swung the heading ~20 deg in on a
+     * wide sweeper). The steer held through a kick or flick does not count as into-steer (CarState.intoLatch);
+     * into-steer follows the wheel in but lets go with the key.
      */
-    curvInto: 1 / 20,
+    curvInto: 1 / 28,
     curvNeutral: 1 / 38,
-    curvCounter: 0,
+    curvCounter: -1 / 150,
+    /** Path curvature multiplier while Space is held in a drift (tighter arc). */
     handbrakeCurvBoost: 1.25,
-    handbrakeDecel: 3,
+    /**
+     * Smooth entry: seconds over which a kick bends the path from the curvature the car had in grip to the
+     * drift target (smoothstep). The kick swings the body into the slide at once without yanking the path.
+     */
+    entryBlendTime: 0.4,
+    /**
+     * The kick holds the line: seconds over which the neutral drift arc eases (smoothstep) from the path the
+     * car had in grip to curvNeutral, so a kick on a wide sweeper does not tuck in before the player reacts.
+     */
+    entryHoldTime: 1.3,
+    /** Seconds over which a flick bends the path from the one the car is on to the new side (smoothstep). */
+    flickBlendTime: 0.3,
+    /**
+     * Space held in a drift (spec §2.3): the rear wheels lock, so there is no engine drive and the speed bleeds
+     * at this rate on top of the drift drag (dragBase + dragSlip*|sin slip|, ~5-7.6), m/s^2: ~10.5-12.5 in
+     * total. Holding W + Space reaches the low-speed exit in ~1.5-1.8 s from 25 m/s, ~1.9-2.2 s from 30 m/s
+     * (a neutral drift on W); a 0.2 s tap costs ~2.3 m/s. Space is for kicking and tightening, never for
+     * sustaining.
+     */
+    handbrakeDecel: 5,
+    /** Space held in grip (below drift speed, no steer, the exit phase): no engine drive, light braking, m/s^2. */
+    handbrakeGripDecel: 4,
     /** Body yaw tracking toward (velocity heading + target slip). */
     bodyResponse: 8,
     bodyMaxYawRate: 4,
@@ -79,7 +104,7 @@ export const TUNING = {
     topStraight: 0.75,
     /** Drift speed cap as a fraction of car.maxSpeed. */
     maxSpeedFactor: 0.9,
-    /** Seconds without throttle and handbrake before the drift ends. */
+    /** Seconds without throttle before the drift ends (Space held or not: only throttle sustains a drift). */
     exitDelay: 0.25,
     /** Seconds for lateral grip (and, during the exit phase, steering authority) to blend back after a drift. */
     gripBlendTime: 0.3,
@@ -94,7 +119,11 @@ export const TUNING = {
     flickWindow: 0.12,
     /**
      * Catch: full counter-steer (steer * driftDir <= -catchSteer) held for catchTime seconds with Space
-     * released ends the drift. Partial counter-steer keeps drifting; Space held keeps the slide.
+     * released ends the drift. Counted while both the input and the wheel (smoothed steer, which sets the
+     * path curvature) are at full counter-steer, so a keyboard counter-steer first slides on a slightly
+     * outward path for catchTime (~0.5 s from the key press out of a neutral drift). Partial counter-steer
+     * keeps drifting; Space held keeps the slide (locked rear wheels), which then bleeds speed (handbrakeDecel)
+     * until the low-speed exit.
      */
     catchSteer: 0.85,
     catchTime: 0.3,
@@ -146,6 +175,28 @@ export const TUNING = {
     iterations: 3,
     /** Seconds before the same collider can emit another scrape event (heavy hits always report). */
     cooldown: 0.3,
+    /**
+     * Wall slide: a scrape (no heavy hit that step) with the nose into a barrier turns the nose toward the
+     * barrier's tangent in the direction of travel, so W slides the car along a barrier instead of
+     * grinding it into it. Turn rate = slideAlignGain (1/s) per radian of heading error, kept within
+     * [slideAlignMinRate, slideAlignMaxRate] (rad/s; the floor reaches parallel in finite time, so the car
+     * leaves the wall instead of grazing it, and scrapeFriction, forever); times slideDriftScale in drift mode
+     * (a drift kissing the wall is not spun). Slower than slideTravelSpeed along the surface (m/s), the nose
+     * turns toward the track's driving direction instead: a pinned car is turned back onto the course, never
+     * into the wrong way. At a heavy obstacle (bench leg, sneaker, bicycle tyre) the nose only deflects
+     * slideObstacleAngle (rad) past the track direction toward the free side (past head-on where no barrier
+     * gives the track direction), and the car is carried along the obstacle's surface toward that side at up
+     * to slideObstacleSpeed (m/s, topping up its own speed along it; a nose pressed in at that angle would
+     * only crawl): it slides around the obstacle and leaves along the track, not along the obstacle's own
+     * surface and across the road.
+     */
+    slideAlignGain: 6,
+    slideAlignMinRate: 0.3,
+    slideAlignMaxRate: 2.5,
+    slideDriftScale: 0.2,
+    slideTravelSpeed: 4,
+    slideObstacleAngle: 20 * DEG,
+    slideObstacleSpeed: 4,
   },
   score: {
     basePerSec: 100,

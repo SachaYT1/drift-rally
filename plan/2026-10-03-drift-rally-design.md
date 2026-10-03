@@ -39,8 +39,8 @@ Game keys call `preventDefault()` while racing. UI buttons are blurred when a ra
 | Counter-steer | smaller angle, straighter path; FULL counter-steer ≈ zero curvature (drive straight while still sliding) |
 | Counter-steer held ~0.3 s (full) | the car "catches" the slide: the drift ends and grip returns |
 | S (brake) | scrubs speed and ends the drift after ~0.15 s |
-| Release W and Space for 0.25 s | the drift ends |
-| Space held | tighter arc + a little more angle (handbrake) |
+| Release W for 0.25 s | the drift ends (only throttle sustains a drift; Space alone does not) |
+| Space held | handbrake: rear wheels locked — tighter arc and a little more angle, but NO engine drive and strong deceleration (~8 m/s²), so holding it for ~1.5–2 s bleeds the speed and ends the drift. Space is for kicking and tightening (short taps), never for sustaining |
 
 - **Every exit keeps the direction of travel:** the nose swings back to the velocity heading (rate-limited) instead of the velocity snapping toward the nose, so the car never darts toward the inside of the corner. Lateral grip still blends back smoothly over ~0.3 s.
 - Flick (direction change in the slalom / bicycle snake): strong opposite steer (steer·driftDir ≤ −0.6) + a Space press, in either order within ~120 ms (or Space held while the steer crosses to the opposite side) → drift direction flips with a rate-limited body swing; the car stays in drift mode, so the chain stays alive.

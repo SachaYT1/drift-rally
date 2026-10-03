@@ -11,3 +11,6 @@ playwright-report
 # Third-party reference screenshots: local only, never publish
 plan/reference/garage.png
 plan/reference/race-camera.png
+
+# Temporary git worktrees created by agents
+.claude/worktrees/

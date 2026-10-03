@@ -8,6 +8,7 @@ import type { Track } from '../track/build';
 import type { GarageScene } from '../render/garageScene';
 import type { GameAudio } from '../audio/sfx';
 import type { InputController } from '../core/input';
+import type { Leaderboard } from './leaderboard';
 import { SAVE_KEY, readSave, updateSave } from '../core/save';
 import { isQualityLevel, pixelRatioFor } from '../core/quality';
 import type { RaceScene } from './raceScene';
@@ -51,6 +52,8 @@ export interface App {
   readonly audio: GameAudio;
   readonly input: InputController;
   readonly test: TestFlags;
+  /** Friends leaderboard; null: off (unit tests). */
+  readonly leaderboard: Leaderboard | null;
   /**
    * Progress (coins, records) as stored, kept current across tabs by the 'storage' event; settings (quality,
    * muted) are this tab's live state.
@@ -104,6 +107,8 @@ export interface AppDeps {
   storage?: Storage | null;
   /** Where other tabs' 'storage' events arrive (default window). */
   storageEvents?: EventTarget;
+  /** Friends leaderboard (default: none). */
+  leaderboard?: Leaderboard | null;
 }
 
 /** Drawing-buffer size for a canvas of w x h CSS px (bounded in small test mode). */
@@ -202,6 +207,7 @@ export function createApp(d: AppDeps): App {
     audio: d.audio,
     input: d.input,
     test: d.test,
+    leaderboard: d.leaderboard ?? null,
     get save() {
       return save;
     },

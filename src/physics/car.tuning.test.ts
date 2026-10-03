@@ -115,6 +115,29 @@ describe('car tuning: drift.*', () => {
     expect(wide).toBeGreaterThan(def + 5 * DEG);
   });
 
+  it('handbrakeDecel sets the drift deceleration while Space is held, on top of the drift drag (no engine drive)', () => {
+    const s = atSpeed(leftDrift(), 25);
+    const space = inp({ throttle: 1, steer: 0.3, handbrake: true });
+    const drag = TUNING.drift.dragBase + TUNING.drift.dragSlip * Math.abs(Math.sin(s.slip));
+    for (const decel of [TUNING.drift.handbrakeDecel, 2 * TUNING.drift.handbrakeDecel]) {
+      const next = stepCar(s, space, 'road', DT, withDrift({ handbrakeDecel: decel }));
+      expect(next.mode).toBe('drift');
+      expect(s.speed - next.speed).toBeCloseTo((drag + decel) * DT, 9);
+    }
+  });
+
+  it('handbrakeGripDecel sets the deceleration while Space is held in grip (no engine drive)', () => {
+    const cruise = moving(0, 20);
+    const space = inp({ throttle: 1, handbrake: true });
+    const v = cruise.speed;
+    const drag = TUNING.car.rollingResistance + TUNING.car.airDrag * v * v;
+    for (const decel of [TUNING.drift.handbrakeGripDecel, 2 * TUNING.drift.handbrakeGripDecel]) {
+      const next = stepCar(cruise, space, 'road', DT, withDrift({ handbrakeGripDecel: decel }));
+      expect(next.mode).toBe('grip');
+      expect(v - next.speed).toBeCloseTo((drag + decel) * DT, 9);
+    }
+  });
+
   it('overspeedDecel sets the bleed above the drift cap, independent of car.brakeDecel', () => {
     let fast = stepCar(moving(0, TUNING.car.maxSpeed * 0.9), inp({ throttle: 1, steer: 1, handbrake: true, handbrakePressed: true }), 'road', DT);
     fast = last(run(fast, 0.5, () => inp({ throttle: 1, steer: 0.3 })));
@@ -128,17 +151,95 @@ describe('car tuning: drift.*', () => {
     expect(run(fast, 1, script, hardBrakes, 'runoff')).toEqual(run(fast, 1, script, TUNING, 'runoff'));
   });
 
+  /**
+   * Path curvature (1/m) of each step of a kick from a straight line, wheel held into the turn (it counts as
+   * neutral: it only picks the side), Space held for `space` seconds.
+   */
+  const kickCurvatures = (t: Tuning, space: number, seconds = 1.5): number[] => {
+    let s: CarState = { ...moving(0, 22), steer: 1 };
+    const out: number[] = [];
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      const next = stepCar(s, inp({ throttle: 1, steer: 1, handbrake: i * DT < space, handbrakePressed: i === 0 }), 'road', DT, t);
+      out.push((Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT));
+      s = next;
+    }
+    return out;
+  };
+
+  it('entryBlendTime sets how long a kick takes to bend the path to the drift target', () => {
+    // The line hold off (entryHoldTime 0) and Space held: the target is curvNeutral x handbrakeCurvBoost.
+    const target = TUNING.drift.curvNeutral * TUNING.drift.handbrakeCurvBoost;
+    const at = (t: Tuning, seconds: number): number =>
+      kickCurvatures({ ...t, drift: { ...t.drift, entryHoldTime: 0 } }, Infinity)[Math.round(seconds / DT) - 1] / target;
+    const T = TUNING.drift.entryBlendTime;
+    expect(at(withDrift({ entryBlendTime: 0 }), DT)).toBeCloseTo(1, 9);
+    expect(at(TUNING, DT)).toBeLessThan(0.01);
+    expect(at(TUNING, T)).toBeCloseTo(1, 9);
+    expect(at(withDrift({ entryBlendTime: 2 * T }), T)).toBeCloseTo(0.5, 2);
+  });
+
+  it('entryHoldTime sets how long a kick holds the line before the neutral drift arc', () => {
+    // From a straight line: the neutral arc eases from 0 to curvNeutral (Space tapped on the first step only).
+    const at = (t: Tuning, seconds: number): number =>
+      kickCurvatures(t, DT)[Math.round(seconds / DT) - 1] / TUNING.drift.curvNeutral;
+    const T = TUNING.drift.entryHoldTime;
+    const blended = TUNING.drift.entryBlendTime + 0.05;
+    expect(at(withDrift({ entryHoldTime: 0 }), blended)).toBeCloseTo(1, 9);
+    expect(at(TUNING, blended)).toBeLessThan(0.5);
+    expect(at(TUNING, T)).toBeCloseTo(1, 9);
+    expect(at(withDrift({ entryHoldTime: 2 * T }), T)).toBeCloseTo(0.5, 2);
+  });
+
+  it('flickBlendTime sets how long a flick takes to bend the path to the new side', () => {
+    /** Path curvature (1/m, + = left) `seconds` into a flick out of a settled left drift, the new key held. */
+    const at = (t: Tuning, seconds: number): number => {
+      let s = last(run(leftDrift(), TUNING.drift.entryHoldTime, () => inp({ throttle: 1 }), t));
+      let k = 0;
+      for (let i = 0; i < Math.round(seconds / DT); i++) {
+        const next = stepCar(s, inp({ throttle: 1, steer: -1, handbrake: i === 0, handbrakePressed: i === 0 }), 'road', DT, t);
+        k = (Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT);
+        s = next;
+      }
+      expect(s.driftDir).toBe(-1);
+      return k;
+    };
+    const T = TUNING.drift.flickBlendTime;
+    const n = TUNING.drift.curvNeutral;
+    expect(at(withDrift({ flickBlendTime: 0 }), 2 * DT)).toBeCloseTo(-n, 9);
+    expect(at(TUNING, DT)).toBeGreaterThan(0.9 * n);
+    expect(at(TUNING, T + DT)).toBeCloseTo(-n, 9);
+    expect(at(withDrift({ flickBlendTime: 2 * T }), T + DT)).toBeCloseTo(0, 2);
+  });
+
+  it('curvCounter sets the path curvature at full counter-steer', () => {
+    /** Velocity-heading change over 0.5 s of full counter-steer (the catch disabled), after the wheel is across. */
+    const turn = (t: Tuning): number => {
+      const across = last(run(leftDrift(), 0.4, () => inp({ throttle: 1, steer: -1 }), t));
+      const after = last(run(across, 0.5, () => inp({ throttle: 1, steer: -1 }), t));
+      return Math.atan2(after.vx, after.vz) - Math.atan2(across.vx, across.vz);
+    };
+    const noCatch = { catchTime: Infinity };
+    expect(Math.abs(turn(withDrift({ ...noCatch, curvCounter: 0 })))).toBeLessThan(1e-9);
+    expect(turn(withDrift(noCatch))).toBeLessThan(-1 * DEG);
+    expect(turn(withDrift({ ...noCatch, curvCounter: 2 * TUNING.drift.curvCounter }))).toBeCloseTo(2 * turn(withDrift(noCatch)), 2);
+  });
+
   it('catchSteer sets how much counter-steer catches the slide', () => {
     const counter = () => inp({ throttle: 1, steer: -0.7 });
     expect(run(leftDrift(), 1, counter).every((s) => s.mode === 'drift')).toBe(true);
     expect(run(leftDrift(), 1, counter, withDrift({ catchSteer: 0.6 })).some((s) => s.mode === 'grip')).toBe(true);
   });
 
-  it('catchTime sets how long the full counter-steer must be held', () => {
-    const exitAt = (t: Tuning) => (run(leftDrift(), 2, () => inp({ throttle: 1, steer: -1 }), t).findIndex((s) => s.mode === 'grip') + 1) * DT;
+  it('catchTime sets how long the full counter-steer must be held (from the wheel reaching it)', () => {
+    /** Seconds from the wheel reaching full counter-steer to the catch. */
+    const holdFor = (t: Tuning) => {
+      const states = run(leftDrift(), 2, () => inp({ throttle: 1, steer: -1 }), t);
+      const full = states.findIndex((s) => s.steer <= -t.drift.catchSteer);
+      return (states.findIndex((s) => s.mode === 'grip') - full + 1) * DT;
+    };
     const c = TUNING.drift.catchTime;
-    expect(exitAt(TUNING)).toBeCloseTo(c, 1);
-    expect(exitAt(withDrift({ catchTime: 2 * c }))).toBeCloseTo(2 * c, 1);
+    expect(holdFor(TUNING)).toBeCloseTo(c, 1);
+    expect(holdFor(withDrift({ catchTime: 2 * c }))).toBeCloseTo(2 * c, 1);
   });
 
   /** Velocity-heading change 0.6 s after a lift exit (steer released), and the states after the exit. */

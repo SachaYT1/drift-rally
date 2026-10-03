@@ -8,7 +8,8 @@
  * path curvature onto the drift steer range (counter .. neutral .. into), short of a catch while the path
  * still curves into the drift; flick when the next corner turns the other way. Once the path ahead needs
  * less than exitCurv into the drift, leave it the way a player would (design spec §2.3): S when well over
- * the grip limit ahead, lift W when just over it, otherwise catch the slide (full counter-steer on W).
+ * the grip limit ahead, lift W when just over it, otherwise catch the slide (full counter-steer on W, held
+ * once the wheel is across until the catch completes, as full counter-steer bends the path slightly outward).
  */
 import { NEUTRAL_INPUT, type Collider, type InputFrame } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
@@ -21,15 +22,25 @@ export const AUTOPILOT = {
   /** |curvature| ahead that triggers a drift kick / a flick into the opposite direction, 1/m. */
   kickCurv: 1 / 60,
   flickCurv: 1 / 60,
-  /** Leave the drift once the path ahead needs less than this curvature into the drift, 1/m. */
-  exitCurv: 1 / 250,
+  /**
+   * Leave the drift once the path ahead needs less than this curvature into the drift, 1/m. Partial
+   * counter-steer can follow a mild sweeper in drift, but a drift on W runs well below the grip top speed.
+   */
+  exitCurv: 1 / 150,
+  /**
+   * Once the wheel is at full counter-steer (catching), keep catching unless the path ahead needs at least
+   * this curvature into the drift (a neutral drift's), 1/m: full counter-steer bends the path slightly
+   * outward, so with the plain exitCurv the pursuit would swing back into a hold every few steps and the
+   * catch would never complete.
+   */
+  catchCommitCurv: 1 / 38,
   /**
    * Holding a drift while the path still curves into it, counter-steer stays this far short of
    * drift.catchSteer (no accidental catch); once it needs a straight path, full counter-steer catches.
    */
   catchMargin: 0.1,
   /** Grip-mode speed limit uses this fraction of car.maxLatAccelGrip. */
-  latShare: 0.85,
+  latShare: 0.9,
   /** Pursuit look-ahead = lookBase + lookSpeed * speed, m; corner scan window = cornerSpeed * speed, m. */
   lookBase: 10,
   lookSpeed: 0.4,
@@ -44,7 +55,7 @@ export const AUTOPILOT = {
   /** Kick a drift only above drift.minSpeed + this, m/s. */
   kickSpeedMargin: 4,
   /** Brake (grip, or out of a drift) when faster than the grip limit + this, m/s. */
-  brakeMargin: 4,
+  brakeMargin: 6,
 } as const;
 
 /** A driving style: AUTOPILOT with any constant overridden (tests and tuning sweeps). */
@@ -124,7 +135,8 @@ export function createAutopilot(track: Track, t: Tuning = TUNING, AP: AutopilotS
         u >= D.curvNeutral
           ? clamp((u - D.curvNeutral) / (D.curvInto - D.curvNeutral), 0, 1)
           : -clamp((D.curvNeutral - u) / (D.curvNeutral - D.curvCounter), 0, 1);
-      if (u >= AP.exitCurv || corner * dir >= AP.kickCurv) {
+      const catching = c.steer * dir <= -D.catchSteer;
+      if (u >= (catching ? AP.catchCommitCurv : AP.exitCurv) || corner * dir >= AP.kickCurv) {
         const hold = u > 0 ? Math.max(rel, AP.catchMargin - D.catchSteer) : rel;
         return { ...NEUTRAL_INPUT, throttle: 1, steer: hold * dir };
       }
