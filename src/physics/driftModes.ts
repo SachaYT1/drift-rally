@@ -59,8 +59,15 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
     if (modeTimer >= (braking ? d.brakeExitTime : d.exitDelay)) return exitDrift(cur, c);
   }
   if (isFlick(s, c, armLeft > 0)) return { ...cur, driftDir: s.driftDir === 1 ? -1 : 1, modeTimer, flickArm: 0 };
-  // Catch: full counter-steer held with Space released ends the drift; any let-up restarts the hold.
-  const countering = s.driftDir !== 0 && !c.handbrake && c.steerInput * s.driftDir <= -d.catchSteer;
+  // Catch: full counter-steer held with Space released ends the drift; any let-up restarts the hold. The hold
+  // counts once the WHEEL (smoothed steer, which sets the path curvature) is at full counter-steer too, so a
+  // keyboard counter-steer first slides straight for catchTime (spec §2.3) instead of catching while the wheel
+  // is still swinging across, and a counter tap followed by Space is a flick, not a catch and a re-kick.
+  const countering =
+    s.driftDir !== 0 &&
+    !c.handbrake &&
+    c.steerInput * s.driftDir <= -d.catchSteer &&
+    c.steer * s.driftDir <= -d.catchSteer;
   const catchTimer = countering ? (s.catchTimer ?? 0) + c.dt : 0;
   if (countering && catchTimer >= d.catchTime) return exitDrift(cur, c);
   return { ...cur, modeTimer, catchTimer };

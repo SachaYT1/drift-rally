@@ -94,7 +94,10 @@ export const TUNING = {
     flickWindow: 0.12,
     /**
      * Catch: full counter-steer (steer * driftDir <= -catchSteer) held for catchTime seconds with Space
-     * released ends the drift. Partial counter-steer keeps drifting; Space held keeps the slide.
+     * released ends the drift. Counted while both the input and the wheel (smoothed steer, which sets the
+     * path curvature) are at full counter-steer, so a keyboard counter-steer first slides straight for
+     * catchTime (~0.5 s from the key press out of a neutral drift). Partial counter-steer keeps drifting;
+     * Space held keeps the slide.
      */
     catchSteer: 0.85,
     catchTime: 0.3,

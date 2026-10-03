@@ -193,15 +193,56 @@ describe('car physics: catching the slide', () => {
   const exitIndex = (side: 1 | -1, seconds: number, input: (i: number) => InputFrame): number =>
     trace(drift(side), steps(seconds), input).findIndex((s) => s.mode !== 'drift');
 
-  it('full counter-steer held for catchTime ends the drift (W held), both directions', () => {
+  /** First index whose WHEEL (smoothed steer) is at full counter-steer in a `side` drift, or -1. */
+  const wheelFullCounter = (t: CarState[], side: 1 | -1): number => t.findIndex((s) => s.steer * side <= -D.catchSteer);
+
+  it('the wheel held at full counter-steer for catchTime ends the drift (W held), both directions', () => {
     for (const side of [1, -1] as const) {
-      const t = trace(drift(side), steps(1), () => inp({ throttle: 1, steer: -side }));
+      const t = trace(drift(side), steps(1.5), () => inp({ throttle: 1, steer: -side }));
+      const full = wheelFullCounter(t, side);
       const exit = t.findIndex((s) => s.mode !== 'drift');
-      expect((exit + 1) * DT).toBeGreaterThanOrEqual(D.catchTime - 1e-9);
-      expect((exit + 1) * DT).toBeLessThanOrEqual(D.catchTime + DT + 1e-9);
+      expect(full).toBeGreaterThan(0);
+      expect((exit - full + 1) * DT).toBeGreaterThanOrEqual(D.catchTime - 1e-9);
+      expect((exit - full + 1) * DT).toBeLessThanOrEqual(D.catchTime + DT + 1e-9);
       expect(t[exit]).toMatchObject({ mode: 'grip', driftDir: 0, driftTime: 0 });
       // Caught for good: W and the counter-steer still held, but no new drift without Space.
       expect(t.slice(exit).every((s) => s.mode === 'grip')).toBe(true);
+    }
+  });
+
+  it('a keyboard counter-steer straightens the path before it catches, from into-steer too (spec §2.3)', () => {
+    // Digital keys: the wheel needs time to swing across, and the path curvature follows the wheel. The
+    // catch waits for the wheel, so the car first slides straight ("full counter-steer ~ zero curvature").
+    for (const side of [1, -1] as const) {
+      for (const pre of [0, 1]) {
+        const kick = stepCar(cruising(22), inp({ throttle: 1, steer: side, handbrake: true, handbrakePressed: true }), 'road', DT);
+        const settled = last(trace(kick, steps(0.6), () => inp({ throttle: 1, steer: pre * side })));
+        const t = trace(settled, steps(1.5), () => inp({ throttle: 1, steer: -side }));
+        const exit = t.findIndex((s) => s.mode !== 'drift');
+        const full = wheelFullCounter(t, side);
+        expect(full, `pre ${pre}`).toBeGreaterThan(0);
+        expect(exit, `pre ${pre}`).toBeGreaterThan(full);
+        // The last catchTime before the catch: a straight slide (< 3 deg of path turn), still sliding.
+        const a = t[exit - steps(D.catchTime) + 1];
+        const b = t[exit - 1];
+        const turn = Math.abs(wrapAngle(Math.atan2(b.vx, b.vz) - Math.atan2(a.vx, a.vz)));
+        expect(turn, `pre ${pre}`).toBeLessThan(3 * (Math.PI / 180));
+        expect(Math.abs(b.slip), `pre ${pre}`).toBeGreaterThan(TUNING.score.minSlip);
+      }
+    }
+  });
+
+  it('a counter-steer tap, then Space with the key still held, flicks: no catch and no re-kick', () => {
+    // A player straightening the line with a counter tap decides to flick: the counter key is already down
+    // (0.25 s), Space follows a reaction later. The car must stay in drift and flip on the press.
+    for (const side of [1, -1] as const) {
+      const spaceAt = steps(0.25 + 0.12);
+      const t = trace(drift(side), steps(0.8), (i) =>
+        inp({ throttle: 1, steer: -side, handbrake: i >= spaceAt && i < spaceAt + steps(0.1), handbrakePressed: i === spaceAt }),
+      );
+      expect(t.every((s) => s.mode === 'drift')).toBe(true);
+      expect(flipIndex(t, side)).toBe(spaceAt);
+      expect(last(t).driftDir).toBe(-side);
     }
   });
 

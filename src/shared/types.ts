@@ -73,8 +73,8 @@ export interface CarState {
   /** Seconds a recent Space press stays armed for a flick (tuning.drift.flickWindow), counting down. */
   flickArm?: number;
   /**
-   * Seconds full counter-steer (steer * driftDir <= -tuning.drift.catchSteer, Space released) has been held
-   * in the current drift; at tuning.drift.catchTime the car catches the slide and the drift ends.
+   * Seconds full counter-steer (input AND wheel: steer * driftDir <= -tuning.drift.catchSteer, Space released)
+   * has been held in the current drift; at tuning.drift.catchTime the car catches the slide and the drift ends.
    */
   catchTimer?: number;
   /**

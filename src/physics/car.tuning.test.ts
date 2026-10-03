@@ -134,11 +134,16 @@ describe('car tuning: drift.*', () => {
     expect(run(leftDrift(), 1, counter, withDrift({ catchSteer: 0.6 })).some((s) => s.mode === 'grip')).toBe(true);
   });
 
-  it('catchTime sets how long the full counter-steer must be held', () => {
-    const exitAt = (t: Tuning) => (run(leftDrift(), 2, () => inp({ throttle: 1, steer: -1 }), t).findIndex((s) => s.mode === 'grip') + 1) * DT;
+  it('catchTime sets how long the full counter-steer must be held (from the wheel reaching it)', () => {
+    /** Seconds from the wheel reaching full counter-steer to the catch. */
+    const holdFor = (t: Tuning) => {
+      const states = run(leftDrift(), 2, () => inp({ throttle: 1, steer: -1 }), t);
+      const full = states.findIndex((s) => s.steer <= -t.drift.catchSteer);
+      return (states.findIndex((s) => s.mode === 'grip') - full + 1) * DT;
+    };
     const c = TUNING.drift.catchTime;
-    expect(exitAt(TUNING)).toBeCloseTo(c, 1);
-    expect(exitAt(withDrift({ catchTime: 2 * c }))).toBeCloseTo(2 * c, 1);
+    expect(holdFor(TUNING)).toBeCloseTo(c, 1);
+    expect(holdFor(withDrift({ catchTime: 2 * c }))).toBeCloseTo(2 * c, 1);
   });
 
   /** Velocity-heading change 0.6 s after a lift exit (steer released), and the states after the exit. */
