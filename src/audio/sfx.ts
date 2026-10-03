@@ -27,7 +27,7 @@ export interface GameAudio {
    * intensity (|slip|, speed). Uses setTargetAtTime.
    */
   update(car: CarState, throttle: number, drifting: boolean, dt: number): void;
-  onEvent(e: GameEvent): void; // coin, hit, scrape, chainBanked, chainBurned, countdown, lap, finish, penalty
+  onEvent(e: GameEvent): void; // coin, hit, scrape, propKnocked, penalty, chainBanked, chainBurned, countdown, lap, finish
   /**
    * Silence engine/screech (garage, results). They start INACTIVE: the race screen must call
    * `setEngineActive(true)` (e.g. at countdown start) to hear the engine.
@@ -227,10 +227,25 @@ export function createSfxPlayer(
     }
   }
 
-  /** Knocked can/cup: metallic tink (inharmonic partials) + a short descending "nope". */
+  /**
+   * Every knocked prop, banked points or not: a can rings with a metallic tink (inharmonic partials), a
+   * paper/plastic cup gives a dull hollow tok (falling triangle + a short click).
+   */
+  function knock(kind: 'can' | 'cup', at: number): void {
+    if (kind === 'can') {
+      tone({ type: 'sine', hz: 1900, peak: 0.13, attack: 0.002, release: 0.25 }, at);
+      tone({ type: 'sine', hz: 2870, peak: 0.08, attack: 0.002, release: 0.16 }, at);
+      return;
+    }
+    tone({ type: 'triangle', hz: 720, toHz: 480, peak: 0.16, attack: 0.002, release: 0.09 }, at);
+    hiss({ filter: 'bandpass', hz: 2600, q: 1.2, peak: 0.07, attack: 0.001, release: 0.03 }, at);
+  }
+
+  /**
+   * Points actually deducted (the session only reports a penalty when something was banked): a quiet
+   * descending "nope" that follows the knock of the same step, so one knock never sounds twice.
+   */
   function penalty(at: number): void {
-    tone({ type: 'sine', hz: 1900, peak: 0.13, attack: 0.002, release: 0.25 }, at);
-    tone({ type: 'sine', hz: 2870, peak: 0.08, attack: 0.002, release: 0.16 }, at);
     tone({ type: 'square', hz: 466, toHz: 233, peak: 0.06, attack: 0.005, hold: 0.04, release: 0.14 }, at + 0.06);
   }
 
@@ -254,6 +269,7 @@ export function createSfxPlayer(
           arpeggio(BANK_NOTES, at, 0.055, 'square', 0.12, 0.28);
           return true;
         case 'chainBurned': burned(at); return true;
+        case 'propKnocked': knock(e.kind, at); return true;
         case 'penalty': penalty(at); return true;
         case 'lap':
           // The final lap is announced by the finish fanfare (same step).
@@ -262,8 +278,7 @@ export function createSfxPlayer(
           return true;
         case 'finish': finish(at); return true;
         default:
-          // chainStart, multiplier (not in the SFX list; the HUD shows it), propKnocked (penalty
-          // covers it), wrongWay, respawn: HUD/fx only.
+          // chainStart, multiplier (not in the SFX list; the HUD shows it), wrongWay, respawn: HUD/fx only.
           return false;
       }
     },
