@@ -144,6 +144,22 @@ describe('car physics: smooth drift entry', () => {
     }
   });
 
+  it('a kick never holds a line curving away from its side: off a path turning the other way it starts straight', () => {
+    // Browser play-test: a re-kick right after a catch (the exit phase was turning the path outward) held that
+    // outward line for entryHoldTime and the drift ran 6 m wide.
+    const ease = (x: number): number => clamp(x, 0, 1) ** 2 * (3 - 2 * clamp(x, 0, 1));
+    for (const side of [1, -1] as const) {
+      const s = onArc(-side as 1 | -1, ARC_STEER);
+      const t = trace(s, steps(D.entryHoldTime + 0.3), kickScript(side, { into: 0.2 }));
+      expect(t.every((x) => x.mode === 'drift' && x.driftDir === side)).toBe(true);
+      const k = curvatures(s, t, side);
+      expect(k[0]).toBeLessThan(0);
+      const blended = steps(D.entryBlendTime);
+      expect(k[blended - 1]).toBeCloseTo(lerp(0, D.curvNeutral, ease(D.entryBlendTime / D.entryHoldTime)), 6);
+      for (const x of k.slice(blended)) expect(x).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it('holding the line costs no speed: the drift on W runs as fast as one that took the neutral arc at once', () => {
     // The drift top speed drops on a straighter path only for counter-steer (no "drift highway"), not while
     // the kick holds the line on its own.

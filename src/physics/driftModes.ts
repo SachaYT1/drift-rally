@@ -56,9 +56,10 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
     if (!kick) return cur;
     const driftDir = c.steerInput > 0 ? 1 : -1;
     // Smooth entry: the drift path starts from the path the car is on (the last step's curvature), and the
-    // neutral arc holds that line for a while; the steer held through the kick only picks the side.
+    // neutral arc holds that line for a while (never one curving away from the drift: a re-kick right after
+    // a catch starts it straight); the steer held through the kick only picks the side.
     const entryCurv = entryPath(s, c);
-    const lineOffset = clamp(entryCurv * driftDir, d.curvCounter, d.curvInto) - d.curvNeutral;
+    const lineOffset = clamp(entryCurv * driftDir, 0, d.curvInto) - d.curvNeutral;
     return {
       ...cur,
       mode: 'drift',

@@ -98,7 +98,7 @@ export interface CarState {
   entryAt?: number;
   /**
    * The kick holds the line: path curvature (1/m, relative to driftDir) by which the neutral drift arc starts
-   * off curvNeutral, from the path the car had in grip (kept within [curvCounter, curvInto]); it eases out
+   * off curvNeutral, from the path the car had in grip (kept within [0, curvInto]); it eases out
    * over tuning.drift.entryHoldTime. 0 after a flick and outside drift mode.
    */
   lineOffset?: number;
