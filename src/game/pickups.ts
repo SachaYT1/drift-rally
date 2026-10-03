@@ -2,10 +2,8 @@
 import type { CarState, GameEvent } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
 import { carCapsule, withDerived } from '../physics/car';
-import { capsuleOverlapsCircle } from '../physics/collision';
 import type { Track } from '../track/build';
-
-type Capsule = ReturnType<typeof carCapsule>;
+import { touches } from './overlap';
 
 export interface PickupState {
   /** Coin ids taken in the current lap. Replaced (never mutated) on change. */
@@ -70,19 +68,4 @@ export function updatePickups(
 /** New lap: coins and props come back; coinsPicked is kept. */
 export function resetLap(state: PickupState): PickupState {
   return { coinsTaken: new Set<number>(), coinsPicked: state.coinsPicked, propsKnocked: new Set<string>() };
-}
-
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
-
-/**
- * Cheap centre-distance precheck (pickups.nearRadius, widened when the capsule reach is larger),
- * then the exact capsule-vs-circle test. NaN-safe (no overlap).
- */
-function touches(car: CarState, cap: Capsule, x: number, z: number, r: number, t: Tuning): boolean {
-  const near = Math.max(t.pickups.nearRadius, t.car.capsuleHalf + t.car.radius + r);
-  const dx = x - car.x;
-  const dz = z - car.z;
-  return dx * dx + dz * dz <= near * near && capsuleOverlapsCircle(cap, x, z, r);
 }

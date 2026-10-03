@@ -245,6 +245,18 @@ export const TUNING = {
     /** A knocked prop is launched with the car velocity times this factor (fx only). */
     propLaunchFactor: 1.2,
   },
+  bomb: {
+    /** Trigger radius tested against the car capsule, m; also the model's radius. */
+    radius: 0.8,
+    /** Share of the car velocity kept through a blast. */
+    speedKeep: 0.45,
+    /** Velocity added across the direction of travel, away from the bomb's side, m/s. */
+    push: 7,
+    /** Spin added by a bomb under one end of the car, rad/s. */
+    yawKick: 2.5,
+    /** The camera shakes as for a heavy hit at this impact speed, m/s. */
+    shakeImpact: 14,
+  },
   track: {
     roadHalfWidth: 7,
     curbWidth: 1,

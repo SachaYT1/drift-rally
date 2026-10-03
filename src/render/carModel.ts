@@ -24,6 +24,11 @@ export interface CarModel {
    * dt <= 0 snaps the front wheels to the state and leaves the suspension untouched.
    */
   update(car: CarState, dt: number): void;
+  /**
+   * Visual hop of the whole car (bomb blast): the root rises and falls back over ~0.45 s. Rendering only;
+   * update() writes root.position.y while airborne (call it after bridge.applyPose(), which zeroes y).
+   */
+  hop(): void;
   setColor(hex: number): void;
   /**
    * Reflections for the paint only (the only MeshStandardMaterial). Do not use `scene.environment` for
@@ -67,6 +72,9 @@ const MAX_UPDATE_DT = 0.1;
 const SPRING_OMEGA = 13;
 const SPRING_ZETA = 0.5;
 const SPRING_SUBSTEP = 1 / 120;
+/** Bomb hop: take-off speed (m/s) and gravity (m/s^2): ~0.48 m high, ~0.44 s in the air. */
+const HOP_SPEED = 4.4;
+const HOP_GRAVITY = 20;
 
 /** Part colours (sRGB hex; converted to linear vertex colours via Color.setHex). */
 const COLORS = {
@@ -291,9 +299,12 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
   let prevVx = 0;
   let prevVz = 0;
   let hasPrev = false;
+  let hopY = 0;
+  let hopVel = 0;
 
   function reset(): void {
     roll.value = roll.vel = pitch.value = pitch.vel = 0;
+    hopY = hopVel = 0;
     accF = accL = 0;
     hasPrev = false;
     steerAngle = 0;
@@ -344,12 +355,24 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
       w.spin.rotation.x = spin;
     }
     if (dt > 0) updateSuspension(car, Math.min(dt, MAX_UPDATE_DT));
+    if (dt > 0 && (hopY > 0 || hopVel > 0)) updateHop(Math.min(dt, MAX_UPDATE_DT));
+    else if (hopY > 0) root.position.y = hopY; // paused mid-air: hold the height
+  }
+
+  function updateHop(dt: number): void {
+    hopVel -= HOP_GRAVITY * dt;
+    hopY += hopVel * dt;
+    if (hopY <= 0) hopY = hopVel = 0;
+    root.position.y = hopY;
   }
 
   return {
     root,
     update,
     reset,
+    hop(): void {
+      hopVel = Math.max(hopVel, HOP_SPEED);
+    },
     setColor(hex: number): void {
       mats.paint.color.setHex(hex);
     },

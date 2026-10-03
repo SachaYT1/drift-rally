@@ -25,6 +25,8 @@ export async function installDebugGui(app: App): Promise<void> {
     ['car', TUNING.car],
     ['drift', TUNING.drift],
     ['camera', TUNING.camera],
+    // bomb.radius only applies to a track built after the change (reload); the blast values apply live.
+    ['bomb', TUNING.bomb],
   ];
   for (const [name, values] of folders) {
     const folder = gui.addFolder(name);

@@ -48,6 +48,8 @@ export const AUTOPILOT = {
   /** Keep this far (m) from the road-side edge of heavy obstacles within avoidRange m along the track. */
   clearance: 7,
   avoidRange: 25,
+  /** Keep this far (m) from the road-side edge of a bomb within avoidRange m along the track. */
+  bombClearance: 3,
   /** Corner scan sample spacing, m. */
   scanStep: 2,
   /** Corner scan starts this far ahead of the car, m. */
@@ -67,31 +69,35 @@ interface ObstacleEdge {
   s: number;
   /** Lateral of the obstacle edge nearest the centreline, m. */
   edge: number;
+  /** How far (m) the racing line keeps from that edge. */
+  clearance: number;
 }
 
-/** Heavy obstacles as (s, lateral of the edge nearest the centreline), via the public Track API. */
-function obstacleEdges(track: Track): ObstacleEdge[] {
-  return track.heavyColliders.flatMap((c: Collider) => {
+/** Heavy obstacles and bombs as (s, lateral of the edge nearest the centreline), via the public Track API. */
+function obstacleEdges(track: Track, AP: AutopilotStyle): ObstacleEdge[] {
+  const edgeOf = (x: number, z: number, r: number, clearance: number): ObstacleEdge => {
+    const p = track.project(x, z);
+    return { s: p.s, edge: p.lateral > 0 ? p.lateral - r : p.lateral + r, clearance };
+  };
+  const heavy = track.heavyColliders.flatMap((c: Collider) => {
     if (c.kind === 'wall') return [];
     const points = c.kind === 'circle' ? [[c.x, c.z]] : [[c.ax, c.az], [c.bx, c.bz]];
-    return points.map(([x, z]) => {
-      const p = track.project(x, z);
-      return { s: p.s, edge: p.lateral > 0 ? p.lateral - c.r : p.lateral + c.r };
-    });
+    return points.map(([x, z]) => edgeOf(x, z, c.r, AP.clearance));
   });
+  return [...heavy, ...track.bombs.map((b) => edgeOf(b.x, b.z, b.r, AP.bombClearance))];
 }
 
 export function createAutopilot(track: Track, t: Tuning = TUNING, AP: AutopilotStyle = AUTOPILOT): Autopilot {
-  const edges = obstacleEdges(track);
+  const edges = obstacleEdges(track, AP);
 
-  /** Racing-line lateral at s: steer clear of obstacles that intrude on the road (e.g. the sneaker). */
+  /** Racing-line lateral at s: steer clear of obstacles that intrude on the road (e.g. the sneaker) and bombs. */
   function lineAt(s: number): number {
     let lo = -Infinity;
     let hi = Infinity;
     for (const e of edges) {
       if (Math.abs(loopDelta(e.s, s, track.length)) > AP.avoidRange) continue;
-      if (e.edge < 0) lo = Math.max(lo, e.edge + AP.clearance);
-      else hi = Math.min(hi, e.edge - AP.clearance);
+      if (e.edge < 0) lo = Math.max(lo, e.edge + e.clearance);
+      else hi = Math.min(hi, e.edge - e.clearance);
     }
     if (lo > hi) return Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 0;
     return clamp(0, lo, hi);

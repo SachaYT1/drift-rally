@@ -1,10 +1,19 @@
 /**
  * Map 1 «Площадь» (design spec §3). Control points, decor x/z and the ground rectangle are MAP
- * units (mockup x, mockup y - 40). Obstacles, props and coins are authored as (s, lateral):
+ * units (mockup x, mockup y - 40). Obstacles, props, bombs and coins are authored as (s, lateral):
  * s = arc length from the first control point (not from the start line), lateral + = left.
  * The s values were measured by projecting the mockup positions onto the built centreline.
  */
-import type { CoinRowDef, DecorDef, FootprintShape, HeavyObstacleDef, LightPropDef, TrackDef, VisualId } from './trackDef';
+import type {
+  BombDef,
+  CoinRowDef,
+  DecorDef,
+  FootprintShape,
+  HeavyObstacleDef,
+  LightPropDef,
+  TrackDef,
+  VisualId,
+} from './trackDef';
 
 const HALF_PI = Math.PI / 2;
 
@@ -52,6 +61,22 @@ const LIGHT: LightPropDef[] = [
   { id: 'can-4', kind: 'can', s: 1443, lateral: 3 },
   { id: 'can-5', kind: 'can', s: 1477, lateral: -3 },
   { id: 'can-6', kind: 'can', s: 1511, lateral: 3 },
+];
+
+/**
+ * One bomb per long drift, on the inside of the corner 2.5 m off the centreline: the tight line passes over
+ * it, the outside stays clear. A keyboard drift into the fountain sweeper (car.driftKeyboard.test.ts) runs
+ * over its bomb; the autopilot's own line passes 1.5-3.7 m from them (it steers around them anyway).
+ */
+const BOMBS: BombDef[] = [
+  // Zone 2: apex of the fountain sweeper (left), before the inner coin row.
+  { id: 'bomb-fountain', s: 390, lateral: 2.5 },
+  // Zone 3: the left flick right after the bicycle.
+  { id: 'bomb-bicycle', s: 630, lateral: 2.5 },
+  // Zone 5: hairpin entry (right), before the coins on the inside.
+  { id: 'bomb-hairpin', s: 1060, lateral: -2.5 },
+  // Top-left: exit of the tight left before the sneaker kink.
+  { id: 'bomb-corner', s: 1620, lateral: 2.5 },
 ];
 
 /** Rows in lap order (coin ids follow this order). 28 coins. */
@@ -148,6 +173,7 @@ export const PLAZA: TrackDef = {
   startS: 50,
   heavy: HEAVY,
   light: LIGHT,
+  bombs: BOMBS,
   coins: COINS,
   decor: DECOR,
   ground: [-200, -260, 860, 700],
