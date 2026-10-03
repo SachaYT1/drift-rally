@@ -1,0 +1,46 @@
+/** Pure mappings from the session state to what the race screen shows. */
+import type { CarState } from '../shared/types';
+import type { SessionState } from '../game/session';
+import type { HudView } from '../ui/hud';
+
+/** Seconds of race time the controls hint stays up (design spec §6: "first 6 s"). */
+export const HINT_SECONDS = 6;
+
+export function hudViewOf(st: Readonly<SessionState>): HudView {
+  return {
+    lap: st.progress.lap,
+    laps: st.laps,
+    time: st.time,
+    bestLap: st.bestLap,
+    coins: st.pickups.coinsPicked,
+    speed: st.car.speed,
+    chainPoints: st.score.chainPoints,
+    multiplier: st.score.multiplier,
+    chainPhase: st.score.phase,
+    totalPoints: st.score.totalPoints,
+    wrongWay: st.progress.wrongWay,
+  };
+}
+
+/** The controls hint shows through the countdown and the first HINT_SECONDS of racing. */
+export function hintVisible(st: Readonly<SessionState>): boolean {
+  return st.phase === 'countdown' || (st.phase === 'racing' && st.time < HINT_SECONDS);
+}
+
+/**
+ * The car frozen by the finish, as seen by the effects: at rest and gripping, so tyre smoke and skid
+ * marks stop instead of piling up on a car the session no longer moves.
+ */
+export function parkedCar(car: Readonly<CarState>, out: CarState = { ...car }): CarState {
+  Object.assign(out, car);
+  out.vx = 0;
+  out.vz = 0;
+  out.speed = 0;
+  out.forwardSpeed = 0;
+  out.lateralSpeed = 0;
+  out.slip = 0;
+  out.yawRate = 0;
+  out.mode = 'grip';
+  out.driftDir = 0;
+  return out;
+}
