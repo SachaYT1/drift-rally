@@ -162,6 +162,13 @@ describe('friends table markup', () => {
     expect(norm(el.querySelector('.dr-note')!.textContent)).toBe('Игроков в таблице: 40');
   });
 
+  it('names the car of each record under the nick, when known', () => {
+    const el = document.createElement('div');
+    el.innerHTML = boardHtml({ top: [{ place: 1, nick: 'Петя', score: 3000, lapMs: 50000, car: 'ronin' }, board.top[1]], me: null, total: 2 }, null);
+    const cars = [...el.querySelectorAll('tbody tr')].map((r) => r.querySelector('.dr-board__nick .dr-board__car')?.textContent ?? null);
+    expect(cars).toEqual(['Ронин', null]);
+  });
+
   it('highlights the player inside the top without a second row', () => {
     const el = document.createElement('div');
     el.innerHTML = boardHtml({ ...board, me: board.top[0] }, 'Петя');

@@ -310,6 +310,7 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-board td { padding: 0.45em 0.7em; border-top: 1px solid var(--dr-border); }
 .dr-board th:nth-child(n + 3), .dr-board td:nth-child(n + 3) { text-align: right; }
 .dr-board__place { width: 2.5em; color: var(--dr-muted); }
+.dr-board__car { display: block; font-size: 0.78em; color: var(--dr-muted); }
 .dr-board__nick { font-weight: 700; overflow-wrap: anywhere; }
 .dr-board tr.is-me td { background: rgb(240 87 58 / 0.12); color: var(--dr-text); }
 .dr-board tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--dr-coral); color: var(--dr-coral); }

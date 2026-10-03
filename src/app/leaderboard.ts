@@ -4,6 +4,7 @@
  * or changes the nick. Never throws; operations run one at a time so a boot flush and a finish never race.
  */
 import type { SaveData } from '../shared/types';
+import type { CarId } from '../shared/cars';
 import {
   LAP_MS_MAX,
   LAP_MS_MIN,
@@ -43,14 +44,15 @@ function hasResult(save: Readonly<SaveData>): boolean {
 }
 
 /**
- * The save's bests within the table's limits: a score above the cap is sent as the cap and an implausible lap
+ * The save's bests (and the car of the best score) within the table's limits: a score above the cap is sent as the cap and an implausible lap
  * as none, so a record the table would refuse cannot keep the player off it for good.
  */
-function bests(save: Readonly<SaveData>): { score: number; lapMs: number | null } {
+function bests(save: Readonly<SaveData>): { score: number; lapMs: number | null; car: CarId | null } {
   const lap = save.bestLapMs;
   return {
     score: Math.min(SCORE_MAX, Math.max(0, Math.floor(save.bestScore))),
     lapMs: lap !== null && lap >= LAP_MS_MIN && lap <= LAP_MS_MAX ? Math.round(lap) : null,
+    car: save.bestScoreCar,
   };
 }
 

@@ -1,4 +1,5 @@
 /** Friends leaderboard types shared by the client, the service and the UI (plan/2026-10-03-leaderboard-design.md). */
+import type { CarId } from './cars';
 
 export const NICK_MIN = 2;
 export const NICK_MAX = 16;
@@ -28,6 +29,8 @@ export interface BoardRow {
   score: number;
   /** null: no finished lap. */
   lapMs: number | null;
+  /** The car of the best score; absent when unknown (a record from before the line-up, or a car this version does not know). */
+  car?: CarId;
 }
 
 export interface Board {
