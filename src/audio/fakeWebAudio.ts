@@ -113,14 +113,18 @@ export function masterOf(ctx: FakeCtx): FakeGain {
   return master;
 }
 
-const isScreechBand = (n: FakeNode): boolean => n instanceof FakeFilter && n.type === 'bandpass' && n.Q.value >= 3;
+/** Audio from `n` reaches a sink (a node without outputs: the destination, or a test's output gain). */
+const audible = (n: FakeNode): boolean => downstream(n).some((d) => d.outputs.length === 0);
+/** Engine sources pass through the engine's high-shelf tone filter; the screech has none. */
+const throughShelf = (n: FakeNode): boolean => downstream(n).some((d) => d instanceof FakeFilter && d.type === 'highshelf');
 
 /**
- * Looping sources: the engine oscillators (audible pitch: started, never stopped, > 20 Hz; the saw
- * first) and the screech noise (the looping noise that feeds the narrow screech bandpasses).
+ * Audible looping sources (started, never stopped; modulators that only feed AudioParams excluded):
+ * the engine oscillators (through the engine's high shelf; the saw first) and the screech sources
+ * (the two tyre oscillators, then the scrub noise).
  */
-export function loopSources(ctx: FakeCtx): { engine: FakeOsc[]; screech: FakeBufferSource[] } {
-  const live = ctx.sources().filter((s) => s.started !== undefined && s.stopped === undefined);
-  return { engine: live.filter((s): s is FakeOsc => s instanceof FakeOsc && s.frequency.value > 20),
-    screech: live.filter((s): s is FakeBufferSource => s instanceof FakeBufferSource && s.loop && fakeNodes(s).some(isScreechBand)) };
+export function loopSources(ctx: FakeCtx): { engine: FakeOsc[]; screech: FakeSource[] } {
+  const live = ctx.sources().filter((s) => s.started !== undefined && s.stopped === undefined && audible(s));
+  return { engine: live.filter((s): s is FakeOsc => s instanceof FakeOsc && throughShelf(s)),
+    screech: live.filter((s) => !throughShelf(s)) };
 }
