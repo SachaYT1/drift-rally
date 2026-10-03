@@ -92,11 +92,14 @@ export function updateDriftScore(
     s = resetChain(s);
   }
 
-  // 2. Knocked light props cost banked points (floored at 0); the chain survives.
+  // 2. Knocked light props cost banked points (floored at 0); the chain survives. The event reports the
+  //    points actually deducted, and there is none when nothing was banked to deduct.
   if (input.propsKnocked > 0) {
-    const points = sc.propPenalty * input.propsKnocked;
-    s.totalPoints = Math.max(0, s.totalPoints - points);
-    events.push({ type: 'penalty', points });
+    const points = Math.min(s.totalPoints, sc.propPenalty * input.propsKnocked);
+    if (points > 0) {
+      s.totalPoints -= points;
+      events.push({ type: 'penalty', points });
+    }
   }
 
   if (input.accruing) {
