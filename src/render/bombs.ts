@@ -20,11 +20,11 @@ export interface BombsLayer {
 
 // ---- Visual-only constants (not gameplay tuning) ----
 const COLORS = { shell: 0x23242b, collar: 0x9aa0a8, fuse: 0xd8c49a } as const;
-const SPARK_COLOR = 0xffb02e;
+const SPARK_COLOR = 0xffc23a;
 /** The shell sinks this share of its radius into the road, so it sits instead of balancing on a point. */
 const SINK = 0.08;
 /** Spark radius at full blink as a share of the bomb radius; blink rate (Hz) and smallest scale (0..1). */
-const SPARK_SCALE = 0.3;
+const SPARK_SCALE = 0.42;
 const BLINK_HZ = 5;
 const BLINK_MIN = 0.45;
 /** Yaw step between neighbouring bombs (rad) and blink phase step (cycles), so they do not look cloned. */

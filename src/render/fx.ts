@@ -68,7 +68,7 @@ const SMOKE: Preset = { life: [0.9, 1.5], size: [0.8, 1.3], grow: [2.6, 3.8], dr
 const SPARK: Preset = { life: [0.25, 0.6], size: [0.2, 0.32], grow: [1, 1], drag: 1.5, gravity: 22 };
 const SPARKLE: Preset = { life: [0.45, 0.75], size: [0.34, 0.42], grow: [0.6, 0.6], drag: 2.5, gravity: 8 };
 const FLASH: Preset = { life: [0.26, 0.26], size: [1.2, 1.2], grow: [3.2, 3.2], drag: 0, gravity: 0 };
-const BLAST_FLASH: Preset = { life: [0.32, 0.32], size: [2.2, 2.2], grow: [3, 3], drag: 0, gravity: 0 };
+const BLAST_FLASH: Preset = { life: [0.36, 0.36], size: [3.4, 3.4], grow: [3, 3], drag: 0, gravity: 0 };
 const SOOT: Preset = { life: [1.2, 1.8], size: [1.2, 1.8], grow: [2.4, 3.2], drag: 1.8, gravity: -1.2 };
 /** Bomb blast: sparks (count, horizontal speed m/s) and soot puffs. */
 const BLAST_SPARKS = 32;
@@ -268,9 +268,13 @@ export function createFx(scene: THREE.Scene): Fx {
     }
   }
 
-  /** Bomb blast: a big orange flash, a dense spark burst and dark soot thrown out and rolling up. */
+  /**
+   * Bomb blast: a big orange flash with a white-hot core, raised so it shows over the car seen from behind,
+   * a dense spark burst and dark soot thrown out and rolling up.
+   */
   function blast(x: number, z: number): void {
-    bursts.spawn(BLAST_FLASH, x, 1, z, 0, 0, 0, 1, C.blast);
+    bursts.spawn(BLAST_FLASH, x, 2, z, 0, 0, 0, 1, C.blast);
+    bursts.spawn(FLASH, x, 2.2, z, 0, 0, 0, 1, C.pale);
     sparks(x, 0.6, z, BLAST_SPARKS, BLAST_SPARK_SPEED);
     for (let i = 0; i < BLAST_SMOKE; i++) {
       const a = rand() * TAU;
