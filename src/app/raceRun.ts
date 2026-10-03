@@ -18,6 +18,7 @@ import { showResults } from '../ui/results';
 import type { App } from './context';
 import { interpolateCar } from './interpolate';
 import { hintVisible, hudViewOf, parkedCar } from './raceView';
+import { inputOnPause, inputOnResume, type PauseCause } from './pauseInput';
 import { applyRaceResult, bestLapSeconds, type SaveOutcome } from './saveResult';
 
 /** Driving input for one fixed step. */
@@ -41,6 +42,7 @@ export interface RaceRun {
   stepNow(n: number, source: InputSource): void;
   /** Driver of the rAF loop; null = render only (the test hook steps). */
   setSource(source: InputSource | null): void;
+  /** Pause as the player would (Esc): keys held stay held for the resume. */
   pause(): void;
   resume(): void;
   /** Show the results right away instead of after the finish delay (no-op before the finish). */
@@ -77,7 +79,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   const parked = { ...renderCar };
 
   race.reset();
-  const hud = createHud(ui, { onPause: () => pause() });
+  const hud = createHud(ui, { onPause: () => pause('player') });
   const pauseMenu = createPauseMenu(ui, {
     onResume: () => resume(),
     onRestart: () => hooks.onRestart(),
@@ -186,14 +188,16 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     app.canvas.focus({ preventScroll: true });
   }
 
-  function pause(): void {
-    if (paused || finished || destroyed) return;
+  function pause(cause: PauseCause): void {
+    if (destroyed) return;
+    // Focus lost while already paused (or after the finish): keyups may still go missing.
+    if (cause === 'focusLost') input.reset();
+    if (paused || finished) return;
     paused = true;
     loop.pause();
     audio.suspend();
-    // Menu buttons must work with Space/Enter while paused; held keys are dropped.
-    input.setRacing(false);
-    input.reset();
+    // Menu buttons must work with Space/Enter while paused; held keys survive a player pause only.
+    inputOnPause(input, cause);
     hudTick(session.state(), 0, true);
     pauseMenu.show();
   }
@@ -202,9 +206,8 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     if (!paused || destroyed) return;
     paused = false;
     pauseMenu.hide();
-    // Drop presses made while paused (an Esc latch would otherwise pause again on the first step).
-    input.reset();
-    input.setRacing(true);
+    // Drop presses made while paused (Esc, R, Space); keys still held (W through Esc / Esc) keep acting.
+    inputOnResume(input);
     focusGame();
     audio.resume();
     loop.resume();
@@ -215,15 +218,15 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     if (e.code === 'Escape') {
       if (finished) return;
       if (paused) resume();
-      else pause();
+      else pause('player');
     } else if (e.code === 'KeyM') {
       app.setMuted(!app.save.muted);
       pauseMenu.sync({ muted: app.save.muted });
     }
   };
-  const onBlur = (): void => pause();
+  const onBlur = (): void => pause('focusLost');
   const onVisibility = (): void => {
-    if (document.hidden) pause();
+    if (document.hidden) pause('focusLost');
   };
 
   window.addEventListener('keydown', onKey);
@@ -257,7 +260,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     setSource(next) {
       source = next;
     },
-    pause,
+    pause: () => pause('player'),
     resume,
     showResultsNow,
     destroy() {

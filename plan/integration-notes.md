@@ -18,7 +18,7 @@ Collected from the wave 1–2 implementer and reviewer reports. Treat as binding
 - `FixedLoop.start()` always begins unpaused (even if `pause()` was called while stopped). To start paused, call `pause()` right after `start()`.
 - `pause()`/`stop()` inside `step()` skips the remaining sub-steps and renders that frame once with `alpha = 0`. Route events to HUD/audio/fx **before** calling `audio.suspend()` / `pauseMenu.show()`.
 - While paused, `advance()` neither steps nor renders: re-render explicitly on resize while paused.
-- On resume call `input.reset()` (otherwise an Esc pressed in the pause menu is consumed by the first step and pauses again) and `loop.resume()`.
+- On resume drop the latches (an Esc or R pressed in the pause menu must not act on the first step) and `loop.resume()`. As built (`src/app/pauseInput.ts`): `setRacing(false)` → `setRacing(true)` drops latches but keeps held keys, so W held through an Esc pause keeps driving; `input.reset()` only when the pause came from blur / a hidden tab (keyups may be lost).
 - `input.setRacing(true)` while racing (preventDefault for game keys); `false` in garage/results. Blur the active element / focus the canvas when a race starts.
 
 ## Rendering
