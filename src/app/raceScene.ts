@@ -20,7 +20,9 @@ import { createPropsLayer, type PropsLayer } from '../render/props';
 import { createBombsLayer } from '../render/bombs';
 import { createFx, type Fx } from '../render/fx';
 import { createChaseCamera, type ChaseCamera } from '../render/chaseCamera';
-import { createCarModel, type CarModel } from '../render/carModel';
+import type { CarModel } from '../render/carModel';
+import { createCarRack } from '../render/carRack';
+import type { CarId } from '../shared/cars';
 import { createGhostLayer, type GhostView } from '../render/ghostCars';
 import { BOTS } from '../game/bots';
 import { applyPose } from '../render/bridge';
@@ -53,11 +55,14 @@ export interface RaceScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly env: RaceEnvironment;
+  /** The visible car. */
   readonly car: CarModel;
   readonly chase: ChaseCamera;
   readonly fx: Fx;
   readonly props: PropsLayer;
   readonly fader: OcclusionFader;
+  /** Race this car of the line-up (call before reset()). */
+  setCar(id: CarId): void;
   /** Start state for a new race: effects cleared, props restored, faders opaque, car at the spawn pose. */
   reset(): void;
   /** Apply one render state; `dt` = seconds since the previous sync (frame or fixed step). */
@@ -86,10 +91,8 @@ export function createRaceScene(
   const bombs = createBombsLayer(track);
   scene.add(bombs.group);
   const fx = createFx(scene);
-  const car = createCarModel();
   // Paint reflections from the garage PMREM; never scene.environment (it would light every Lambert surface).
-  car.setEnvMap(envMap, RACE_ENV_INTENSITY);
-  scene.add(car.root);
+  const rack = createCarRack(scene, (model) => model.setEnvMap(envMap, RACE_ENV_INTENSITY));
   const ghosts = createGhostLayer();
   ghosts.setRoster(BOTS);
   scene.add(ghosts.group);
@@ -103,6 +106,7 @@ export function createRaceScene(
   const spawn = track.spawnPose;
 
   function sync(f: RaceFrame, dt: number): void {
+    const car = rack.current;
     const c = f.car;
     if (f.snap) car.reset();
     applyPose(car.root, c.x, c.z, c.heading);
@@ -144,7 +148,12 @@ export function createRaceScene(
     scene,
     camera,
     env,
-    car,
+    get car() {
+      return rack.current;
+    },
+    setCar(id: CarId): void {
+      rack.show(id);
+    },
     chase,
     fx,
     props,

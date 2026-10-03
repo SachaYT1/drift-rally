@@ -1,20 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createCarModel } from './carModel';
-import type { CarBody } from './carParts';
-import { ISKRA } from './bodies/iskra';
-import { QUADRO } from './bodies/quadro';
-import { RONIN } from './bodies/ronin';
-import { SCARAB } from './bodies/scarab';
+import { CAR_BODIES } from './carBodies';
 import { createCarState } from '../physics/car';
 import { TUNING } from '../shared/tuning';
 
-/** Every body of the line-up (Task 7 replaces this with CAR_BODIES). */
-const BODIES: Record<string, CarBody> = { iskra: ISKRA, quadro: QUADRO, ronin: RONIN, scarab: SCARAB };
 const WHEELS = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 
 describe('car models', () => {
-  for (const [id, body] of Object.entries(BODIES)) {
+  for (const [id, body] of Object.entries(CAR_BODIES)) {
     it(`${id}: stays within the shared footprint, on the ground`, () => {
       const car = createCarModel(body);
       car.root.updateMatrixWorld(true);
