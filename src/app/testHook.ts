@@ -34,6 +34,8 @@ export interface GameTestState {
   time: number;
   paused: boolean;
   fps?: number;
+  /** Ghost bots of the run (banked points), in roster order; empty when switched off or no race. */
+  bots: { id: string; points: number; finished: boolean }[];
 }
 
 export type RealtimeDriver = 'keyboard' | 'autopilot' | null;
@@ -140,6 +142,10 @@ export function installTestHook(target: HookTarget): GameTestHook {
         time: st?.time ?? 0,
         paused: r?.paused ?? false,
         fps: a?.fps,
+        bots: (r?.ghosts?.field.bots ?? []).map((b) => {
+          const bs = b.session.state();
+          return { id: b.def.id, points: bs.score.totalPoints, finished: bs.phase === 'finished' };
+        }),
       };
     },
     finish() {

@@ -9,6 +9,8 @@ import type { AssetLibrary } from '../core/assets';
 import { loadAssets } from '../core/assets';
 import { createCarState } from '../physics/car';
 import { createPickups } from '../game/pickups';
+import { BOTS } from '../game/bots';
+import { GHOST_OPACITY, type GhostView } from '../render/ghostCars';
 import type { Track } from '../track/build';
 import { createGarageScene, type GarageScene } from '../render/garageScene';
 import { fontsReady } from '../ui/screens';
@@ -58,7 +60,17 @@ export async function loadScenes(
   return { assets, garage, race };
 }
 
-/** Compile both scenes, then render one hidden frame of each with the race effects on screen. */
+/** The bots' ghosts in a row ahead of the prewarm car, opaque enough to draw (their programs and labels compile). */
+function prewarmGhosts(car: CarState, fx: number, fz: number): GhostView[] {
+  return BOTS.map((_, i) => ({
+    car: { ...car, x: car.x + fx * (14 + 6 * i), z: car.z + fz * (14 + 6 * i) },
+    points: 0,
+    opacity: GHOST_OPACITY,
+    visible: true,
+  }));
+}
+
+/** Compile both scenes, then render one hidden frame of each with the race effects (and ghosts) on screen. */
 export async function compileAndPrewarm(
   renderer: THREE.WebGLRenderer,
   scenes: LoadedScenes,
@@ -92,7 +104,11 @@ export async function compileAndPrewarm(
   const pickups = createPickups();
   for (let i = 0; i < PREWARM.frames; i++) {
     const step = i * PREWARM.speed * PREWARM.dt;
-    race.sync({ car: { ...car, x: car.x + fx * step, z: car.z + fz * step }, surface: 'road', pickups, simTime: i * PREWARM.dt, snap: i === 0 }, PREWARM.dt);
+    const drawn = { ...car, x: car.x + fx * step, z: car.z + fz * step };
+    race.sync(
+      { car: drawn, surface: 'road', pickups, simTime: i * PREWARM.dt, snap: i === 0, ghosts: prewarmGhosts(drawn, fx, fz) },
+      PREWARM.dt,
+    );
   }
   race.render(renderer);
   renderer.render(garage.scene, garage.camera);

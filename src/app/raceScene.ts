@@ -1,8 +1,8 @@
 /**
  * The race scene, built once during loading and reused by every race (retries never rebuild or dispose
- * anything): lighting environment, track surface, static world, props, bombs, effects, the car and the chase
- * camera with the occlusion fader. sync() applies one render state; onEvent() routes session events to the
- * scene-side consumers (effects, props, camera shake, the car's bomb hop).
+ * anything): lighting environment, track surface, static world, props, bombs, effects, the car, the ghost cars
+ * of the bots and the chase camera with the occlusion fader. sync() applies one render state; onEvent() routes
+ * session events to the scene-side consumers (effects, props, camera shake, the car's bomb hop).
  */
 import * as THREE from 'three';
 import type { CarState, GameEvent, QualityLevel, SurfaceKind } from '../shared/types';
@@ -21,6 +21,8 @@ import { createBombsLayer } from '../render/bombs';
 import { createFx, type Fx } from '../render/fx';
 import { createChaseCamera, type ChaseCamera } from '../render/chaseCamera';
 import { createCarModel, type CarModel } from '../render/carModel';
+import { createGhostLayer, type GhostView } from '../render/ghostCars';
+import { BOTS } from '../game/bots';
 import { applyPose } from '../render/bridge';
 import { separateInstancedShadowCasters } from '../render/shadowCasters';
 
@@ -43,6 +45,8 @@ export interface RaceFrame {
   simTime: number;
   /** Teleport (race start, respawn): place camera and car model without smoothing. */
   snap: boolean;
+  /** The bots' ghosts, in roster order; null / absent: no ghosts (switched off). */
+  ghosts?: readonly GhostView[] | null;
 }
 
 export interface RaceScene {
@@ -84,6 +88,9 @@ export function createRaceScene(
   // Paint reflections from the garage PMREM; never scene.environment (it would light every Lambert surface).
   car.setEnvMap(envMap, RACE_ENV_INTENSITY);
   scene.add(car.root);
+  const ghosts = createGhostLayer();
+  ghosts.setRoster(BOTS);
+  scene.add(ghosts.group);
   // Coins and props are instanced shadow casters: keep three's shared shadow depth program from flipping.
   separateInstancedShadowCasters(scene);
 
@@ -107,6 +114,8 @@ export function createRaceScene(
     fx.update(f.effectsCar ?? c, f.surface, dt);
     props.update(f.pickups, f.simTime, dt);
     bombs.update(f.bombs ?? null, f.simTime);
+    if (f.ghosts) ghosts.update(f.ghosts, f.snap, dt, camera.position);
+    else ghosts.hide();
   }
 
   function reset(): void {

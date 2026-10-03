@@ -194,10 +194,6 @@ export function createGhostLayer(): GhostLayer {
     g.label.material.dispose();
   }
 
-  function hideGhost(g: Ghost): void {
-    g.root.visible = false;
-  }
-
   return {
     group,
     setRoster(defs) {
@@ -225,7 +221,7 @@ export function createGhostLayer(): GhostLayer {
         const g = ghosts[i];
         const v = views[i];
         if (!v || !v.visible || !(v.opacity >= MIN_VISIBLE_OPACITY)) {
-          hideGhost(g);
+          g.root.visible = false;
           continue;
         }
         const c = v.car;
@@ -251,10 +247,8 @@ export function createGhostLayer(): GhostLayer {
       }
     },
     hide() {
-      for (const g of ghosts) {
-        hideGhost(g);
-        g.model.reset();
-      }
+      // Cheap enough for every frame with the ghosts off; a ghost settles when it reappears (update()).
+      for (const g of ghosts) g.root.visible = false;
     },
   };
 }
