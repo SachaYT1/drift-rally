@@ -53,9 +53,10 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // `?test`: render contract (low, pixel ratio 1, <= 640x360) unless `&full` / `&quality=` opt out.
   const { test, quality: forced } = testFlagsFrom(params);
-  // `?test&car=<id>`: the garage opens on that car (screenshots of every body); the save is not changed.
+  // `?test&car=<id>`: the first garage opens on that car (screenshots of every body). Opening it changes nothing
+  // in the save; buying and racing work as usual.
   const carParam = params.get('car');
-  const previewCar = test.enabled && isCarId(carParam) ? carParam : null;
+  let previewCar: CarId | null = test.enabled && isCarId(carParam) ? carParam : null;
   const canvas = byId<HTMLCanvasElement>('game');
   const ui = byId('ui');
 
@@ -71,6 +72,7 @@ async function boot(): Promise<void> {
     if (!app || halted) return;
     raceScreen = null;
     garageScreen = enterGarage(app, { lastShown: lastShownSave, onStart: goRace, previewCar });
+    previewCar = null;
     lastShownSave = app.save;
   }
 
