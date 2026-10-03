@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/e2e",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test",
-    "e2e:software": "E2E_RENDERER=software playwright test",
+    "e2e": "playwright test --project=gpu",
+    "e2e:software": "playwright test --project=software",
+    "e2e:all": "playwright test",
     "assets": "node scripts/build-assets.mjs"
   },
   "dependencies": {

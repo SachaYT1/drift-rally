@@ -47,13 +47,16 @@ npm run dev
 | `npm run typecheck` | `tsc --noEmit` для игры и e2e-тестов |
 | `npm test` | юнит-тесты Vitest (`src/**/*.test.ts`) |
 | `npm run test:watch` | Vitest в режиме наблюдения |
-| `npm run e2e` | smoke-тест Playwright на реальной видеокарте: собирает игру, поднимает preview на 4173 и проходит гараж → заезд → результаты |
-| `npm run e2e:software` | тот же тест на программном рендере SwiftShader (машины и CI без GPU) |
+| `npm run e2e` | smoke-тест Playwright на реальной видеокарте (проект `gpu`): собирает игру, поднимает preview на 4173 и проходит гараж → заезд → результаты |
+| `npm run e2e:software` | тот же тест на программном рендере SwiftShader (проект `software`; машины и CI без GPU) |
+| `npm run e2e:all` | оба варианта рендера подряд |
 | `npm run assets` | пересобирает модели в `public/models/` из паков Kenney (нужен интернет; готовые модели уже лежат в репозитории) |
 
 Перед первым `npm run e2e` установите браузер: `npx playwright install chromium`.
-`E2E_RENDERER=all npm run e2e` прогоняет оба варианта рендера. Скриншоты и трейсы падений
-складываются в `test-results/`, HTML-отчёт — в `playwright-report/`.
+Варианты рендера — это проекты Playwright `gpu` и `software` (`playwright.config.ts`), скрипты
+выбирают их флагом `--project`, переменные окружения не нужны (скрипты работают и в Windows).
+Дополнительные флаги передаются после `--`, например `npm run e2e -- --headed`. Скриншоты и трейсы
+падений складываются в `test-results/`, HTML-отчёт — в `playwright-report/`.
 
 Тестовый режим `?test` (`http://127.0.0.1:4173/?test`) отдаёт `window.__game` для автоматизации:
 `startRace()`, `step(n, input)`, `autopilot(n)`, `finish()`, `state()`. В нём качество low, буфер
