@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudio, MASTER_LEVEL, MAX_VOICES, type GameAudio } from './sfx';
-import { engineFrequency, engineLevel, LOOP_DUCK, screechFrequency, screechIntensity } from './engine';
+import { LOOP_DUCK, screechFrequency, screechIntensity } from './engine';
+import { DEFAULT_ENGINE_PRESET, enginePitch } from './enginePresets';
+import { FakeCtx, FakeGain, FakeNode, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
 import { TUNING } from '../shared/tuning';
 import { DEG } from '../shared/math';
 import type { CarState, GameEvent, RaceResult } from '../shared/types';
@@ -35,73 +37,6 @@ function exerciseEverything(a: GameAudio): void {
   a.setEngineActive(false);
 }
 
-// --- Strict fake Web Audio: throws where real browsers throw, records automation. ---
-
-interface Call { m: 'set' | 'linear' | 'exp' | 'target'; v: number; t: number }
-
-function checkArgs(v: number, t: number): void {
-  if (!Number.isFinite(v) || !Number.isFinite(t)) throw new TypeError('non-finite AudioParam argument');
-  if (t < 0) throw new RangeError('negative time');
-}
-
-class FakeParam {
-  calls: Call[] = [];
-  constructor(private v: number) {}
-  get value(): number { return this.v; }
-  set value(x: number) { checkArgs(x, 0); this.v = x; }
-  private push(m: Call['m'], v: number, t: number): this { checkArgs(v, t); this.calls.push({ m, v, t }); return this; }
-  setValueAtTime(v: number, t: number): this { return this.push('set', v, t); }
-  linearRampToValueAtTime(v: number, t: number): this { return this.push('linear', v, t); }
-  exponentialRampToValueAtTime(v: number, t: number): this { if (v === 0) throw new RangeError('exp ramp to 0'); return this.push('exp', v, t); }
-  setTargetAtTime(v: number, t: number, tau: number): this { if (!(tau >= 0)) throw new RangeError('bad tau'); return this.push('target', v, t); }
-  cancelScheduledValues(t: number): this { checkArgs(0, t); this.calls = this.calls.filter((c) => c.t < t); return this; }
-  /** Value the param is heading to (last automation target, else the static value). */
-  latest(): number { return this.calls.at(-1)?.v ?? this.v; }
-}
-
-class FakeNode {
-  outputs: (FakeNode | FakeParam)[] = [];
-  constructor(readonly ctx: FakeCtx, readonly kind: string) { ctx.nodes.push(this); }
-  connect<T extends FakeNode | FakeParam>(dest: T): T { this.outputs.push(dest); return dest; }
-  disconnect(): void { this.outputs = []; }
-}
-class FakeGain extends FakeNode { gain = new FakeParam(1); }
-class FakeFilter extends FakeNode { type = 'lowpass'; frequency = new FakeParam(350); Q = new FakeParam(1); gain = new FakeParam(0); detune = new FakeParam(0); }
-class FakeCompressor extends FakeNode {
-  threshold = new FakeParam(-24); knee = new FakeParam(30); ratio = new FakeParam(12); attack = new FakeParam(0.003); release = new FakeParam(0.25);
-}
-class FakeSource extends FakeNode {
-  started: number | undefined; stopped: number | undefined; onended: (() => void) | null = null;
-  start(t = 0): void { if (this.started !== undefined) throw new Error('InvalidStateError: start twice'); checkArgs(0, t); this.started = t; }
-  stop(t = 0): void { if (this.started === undefined) throw new Error('InvalidStateError: stop before start'); checkArgs(0, t); this.stopped = t; }
-}
-class FakeOsc extends FakeSource { type = 'sine'; frequency = new FakeParam(440); detune = new FakeParam(0); }
-class FakeBuffer {
-  private readonly data: Float32Array;
-  constructor(readonly numberOfChannels: number, readonly length: number, readonly sampleRate: number) { this.data = new Float32Array(length); }
-  get duration(): number { return this.length / this.sampleRate; }
-  getChannelData(): Float32Array { return this.data; }
-}
-class FakeBufferSource extends FakeSource { buffer: FakeBuffer | null = null; loop = false; playbackRate = new FakeParam(1); }
-
-class FakeCtx {
-  nodes: FakeNode[] = [];
-  state: 'suspended' | 'running' | 'closed' = 'suspended';
-  currentTime = 1; sampleRate = 48000; resumeCalls = 0; suspendCalls = 0;
-  broken = false; // when set, oscillator creation throws (a browser-specific Web Audio failure)
-  destination = new FakeNode(this, 'destination');
-  createGain(): FakeGain { return new FakeGain(this, 'gain'); }
-  createOscillator(): FakeOsc { if (this.broken) throw new Error('NotSupportedError'); return new FakeOsc(this, 'osc'); }
-  createBiquadFilter(): FakeFilter { return new FakeFilter(this, 'filter'); }
-  createDynamicsCompressor(): FakeCompressor { return new FakeCompressor(this, 'compressor'); }
-  createBufferSource(): FakeBufferSource { return new FakeBufferSource(this, 'bufferSource'); }
-  createBuffer(ch: number, len: number, sr: number): FakeBuffer { return new FakeBuffer(ch, len, sr); }
-  resume(): Promise<void> { this.resumeCalls++; this.state = 'running'; return Promise.resolve(); }
-  suspend(): Promise<void> { this.suspendCalls++; this.state = 'suspended'; return Promise.resolve(); }
-  close(): Promise<void> { this.state = 'closed'; return Promise.resolve(); }
-  sources(): FakeSource[] { return this.nodes.filter((n): n is FakeSource => n instanceof FakeSource); }
-}
-
 function setup(): { ctx: FakeCtx; audio: GameAudio; made: () => number } {
   const ctx = new FakeCtx();
   let made = 0;
@@ -116,39 +51,6 @@ async function started(): Promise<Started> {
   const s = setup();
   await s.audio.unlock();
   return { ...s, master: masterOf(s.ctx), ...loopSources(s.ctx) };
-}
-
-/** Product of the latest gain targets on every path from `from` to `to` (max over paths). */
-function pathGain(from: FakeNode, to: FakeNode): number {
-  if (from === to) return 1;
-  const nodes = from.outputs.filter((o): o is FakeNode => o instanceof FakeNode);
-  return Math.max(0, ...nodes.map((o) => pathGain(o, to) * (o instanceof FakeGain ? o.gain.latest() : 1)));
-}
-
-/** Gain nodes on some path from `from` to `to` (excluding `to`). */
-function gainsBetween(from: FakeNode, to: FakeNode): FakeGain[] {
-  const found: FakeGain[] = [];
-  const reaches = (n: FakeNode): boolean => {
-    // map (not some): every branch is walked so every gain on any path is collected.
-    const hit = n === to || n.outputs.filter((o): o is FakeNode => o instanceof FakeNode).map(reaches).includes(true);
-    if (hit && n !== to && n instanceof FakeGain && !found.includes(n)) found.push(n);
-    return hit;
-  };
-  return reaches(from) ? found : [];
-}
-
-function masterOf(ctx: FakeCtx): FakeGain {
-  const comp = ctx.nodes.find((n) => n instanceof FakeCompressor);
-  const master = ctx.nodes.find((n): n is FakeGain => n instanceof FakeGain && n.outputs.includes(comp as FakeNode));
-  if (!master) throw new Error('no master gain');
-  return master;
-}
-
-/** Looping sources: the engine oscillators (started, never stopped) and the screech noise. */
-function loopSources(ctx: FakeCtx): { engine: FakeOsc[]; screech: FakeBufferSource[] } {
-  const live = ctx.sources().filter((s) => s.started !== undefined && s.stopped === undefined);
-  return { engine: live.filter((s): s is FakeOsc => s instanceof FakeOsc && s.frequency.value > 20),
-    screech: live.filter((s): s is FakeBufferSource => s instanceof FakeBufferSource && s.loop) };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -171,21 +73,7 @@ describe('audio without Web Audio (node)', () => {
   });
 });
 
-describe('engine and screech mappings', () => {
-  it('engine pitch rises monotonically with rpm and drifting adds wheelspin', () => {
-    const f = Array.from({ length: 11 }, (_, i) => engineFrequency(i / 10, false));
-    for (let i = 1; i < f.length; i++) expect(f[i]).toBeGreaterThan(f[i - 1]);
-    expect(f[0] > 50 && f[10] < 800).toBe(true);
-    expect(engineFrequency(0.5, true)).toBeGreaterThan(engineFrequency(0.5, false));
-    expect(engineFrequency(-3, false)).toBe(engineFrequency(0, false));
-  });
-
-  it('engine level rises with throttle and stays modest', () => {
-    expect(engineLevel(0.5, 1)).toBeGreaterThan(engineLevel(0.5, 0));
-    expect(engineLevel(0, 0)).toBeGreaterThan(0);
-    expect(engineLevel(1, 1)).toBeLessThanOrEqual(0.3);
-  });
-
+describe('screech mappings', () => {
   it('screech follows slip and speed, is loud in a drift, silent otherwise', () => {
     const fast = TUNING.drift.minSpeed * 2;
     expect(screechIntensity(car({ speed: fast }), false)).toBe(0);
@@ -222,7 +110,7 @@ describe('audio graph (fake AudioContext)', () => {
     expect(master.gain.value).toBeCloseTo(MASTER_LEVEL);
     expect(ctx.state).toBe('running');
     const nodeCount = ctx.nodes.length;
-    expect(engine).toHaveLength(2);
+    expect(engine).toHaveLength(3); // saw, triangle, sub-octave sine
     expect(screech).toHaveLength(1);
     await audio.unlock();
     expect(made()).toBe(1);
@@ -342,7 +230,7 @@ describe('audio graph (fake AudioContext)', () => {
 
   it('re-enabling after silence restarts the engine at idle; a quick re-enable glides on', async () => {
     const { ctx, audio, engine: [osc] } = await started();
-    const idle = engineFrequency(0, false);
+    const idle = enginePitch(DEFAULT_ENGINE_PRESET.gearbox.idleRev);
     audio.setEngineActive(true);
     audio.update(car({ rpm: 0.9, speed: 30 }), 1, false, 1 / 60);
     const high = osc.frequency.latest();

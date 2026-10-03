@@ -22,7 +22,10 @@ export interface GameAudio {
   /** Fade out and suspend the context (pause, blur, hidden tab). */
   suspend(): void;
   resume(): void;
-  /** Engine pitch from car.rpm & throttle; screech gain from drift intensity (|slip|, speed). Uses setTargetAtTime. */
+  /**
+   * Engine from car.speed through a virtual gearbox (+ throttle, drift wheel-spin); screech gain from drift
+   * intensity (|slip|, speed). Uses setTargetAtTime.
+   */
   update(car: CarState, throttle: number, drifting: boolean, dt: number): void;
   onEvent(e: GameEvent): void; // coin, hit, scrape, chainBanked, chainBurned, countdown, lap, finish, penalty
   /**

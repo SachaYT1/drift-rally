@@ -1,8 +1,8 @@
 /**
  * Audio graph building blocks (design spec §5 Audio): the master chain, the shared noise buffer
  * and the continuous race voices:
- * - engine: 2 detuned oscillators (saw + square) -> resonant lowpass -> highpass; pitch from rpm.
- *   Voiced as a small buzzy RC-car motor: high idle, fast-rising pitch, nasal filter resonance.
+ * - engine: car speed -> virtual gearbox (gearbox.ts) -> engine rev -> warm petrol-engine voice
+ *   (engineVoice.ts, voiced by an EnginePreset from enginePresets.ts; the game uses preset A).
  * - tyre screech: looping white noise -> 2 cascaded bandpasses (centre wobbles a little)
  *   -> gain ∝ drift intensity.
  *
@@ -14,34 +14,9 @@
 import { clamp, lerp } from '../shared/math';
 import { TUNING } from '../shared/tuning';
 import type { CarState } from '../shared/types';
-
-/** Engine voicing. Audio-only mix constants (gameplay thresholds come from TUNING). */
-export const ENGINE_VOICE = {
-  idleHz: 82,
-  maxHz: 430,
-  /** Exponent < 1: pitch climbs quickly off idle, like a tiny high-revving motor. */
-  pitchCurve: 0.85,
-  /** Pitch bump while drifting (wheelspin). */
-  driftPitch: 1.07,
-  /**
-   * Saw and a quieter square detuned ~60 cents apart: at driving rpm the beat (~9-15 Hz) is
-   * heard as raspy roughness, not slow "wow" pulsing; at idle it gives a lumpy ~3 Hz idle.
-   */
-  sawDetuneCents: -15,
-  squareDetuneCents: 45,
-  squareMix: 0.25,
-  cutoffBaseHz: 520,
-  cutoffRpmHz: 2400,
-  cutoffThrottleHz: 1300,
-  filterQ: 4.5,
-  /** Small-speaker character: no rumble below this. */
-  highpassHz: 95,
-  levelIdle: 0.045,
-  levelRpm: 0.035,
-  levelThrottle: 0.055,
-  pitchTau: 0.035,
-  levelTau: 0.06,
-} as const;
+import { DEFAULT_ENGINE_PRESET, type EnginePreset } from './enginePresets';
+import { createEngineVoice, hardSet } from './engineVoice';
+import { initialGearbox, stepGearbox, type GearboxState } from './gearbox';
 
 /** Tyre screech voicing. */
 export const SCREECH_VOICE = {
@@ -103,25 +78,6 @@ function unit(v: number): number {
   return Number.isFinite(v) ? clamp(v, 0, 1) : 0;
 }
 
-/** Engine oscillator frequency, Hz. */
-export function engineFrequency(rpm: number, drifting: boolean): number {
-  const E = ENGINE_VOICE;
-  const f = lerp(E.idleHz, E.maxHz, Math.pow(unit(rpm), E.pitchCurve));
-  return drifting ? f * E.driftPitch : f;
-}
-
-/** Engine gain (pre-bus): louder on throttle and at high rpm. */
-export function engineLevel(rpm: number, throttle: number): number {
-  const E = ENGINE_VOICE;
-  return E.levelIdle + E.levelRpm * unit(rpm) + E.levelThrottle * unit(throttle);
-}
-
-/** Engine lowpass cutoff, Hz: brighter on throttle and at high rpm. */
-export function engineCutoff(rpm: number, throttle: number): number {
-  const E = ENGINE_VOICE;
-  return E.cutoffBaseHz + E.cutoffRpmHz * unit(rpm) + E.cutoffThrottleHz * unit(throttle);
-}
-
 /**
  * |slip| folded into [0, π/2], rad. slip is heading minus velocity heading, so rolling straight
  * backwards gives |slip| ≈ π: that counts as aligned (reversing never screeches), while a sideways
@@ -179,15 +135,21 @@ export interface LoopVoices {
   duck(at: number, hold: number): void;
 }
 
-/** Cancels pending automation and jumps to `v` at `now`. Only for params that are inaudible. */
-function hardSet(p: AudioParam, v: number, now: number): void {
-  p.cancelScheduledValues(now);
-  p.setValueAtTime(v, now);
-}
+/** Engine "lifts off" this much during an up-shift (darker for a moment), throttle multiplier. */
+const SHIFT_LIFT = 0.25;
+/** Longest gap between two updates the gearbox integrates, s (a stalled tab must not jump the flare). */
+const MAX_STEP = 0.1;
 
-/** Builds the engine + screech graph into `out` and starts its sources. Starts silent. */
-export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: AudioBuffer): LoopVoices {
-  const E = ENGINE_VOICE;
+/**
+ * Builds the engine + screech graph into `out` and starts its sources. Starts silent.
+ * `preset` voices the engine (the game uses DEFAULT_ENGINE_PRESET; the sound lab compares others).
+ */
+export function createLoopVoices(
+  ctx: BaseAudioContext,
+  out: AudioNode,
+  noise: AudioBuffer,
+  preset: EnginePreset = DEFAULT_ENGINE_PRESET,
+): LoopVoices {
   const S = SCREECH_VOICE;
 
   const bus = ctx.createGain();
@@ -195,30 +157,10 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
   const ducker = ctx.createGain();
   bus.connect(ducker).connect(out);
 
-  // Engine: saw + quieter square, slightly detuned, through a resonant lowpass.
-  const saw = ctx.createOscillator();
-  saw.type = 'sawtooth';
-  saw.frequency.value = E.idleHz;
-  saw.detune.value = E.sawDetuneCents;
-  const square = ctx.createOscillator();
-  square.type = 'square';
-  square.frequency.value = E.idleHz;
-  square.detune.value = E.squareDetuneCents;
-  const squareMix = ctx.createGain();
-  squareMix.gain.value = E.squareMix;
-  const lowpass = ctx.createBiquadFilter();
-  lowpass.type = 'lowpass';
-  lowpass.frequency.value = E.cutoffBaseHz;
-  lowpass.Q.value = E.filterQ;
-  const highpass = ctx.createBiquadFilter();
-  highpass.type = 'highpass';
-  highpass.frequency.value = E.highpassHz;
-  highpass.Q.value = 0.7;
-  const engineGain = ctx.createGain();
-  engineGain.gain.value = E.levelIdle;
-  saw.connect(lowpass);
-  square.connect(squareMix).connect(lowpass);
-  lowpass.connect(highpass).connect(engineGain).connect(bus);
+  const engine = createEngineVoice(ctx, bus, noise, preset);
+  let gearbox: GearboxState = initialGearbox(preset.gearbox);
+  /** Context time of the previous update (null right after a reset). */
+  let lastAt: number | null = null;
 
   // Screech: looping noise through two bandpasses whose centre wobbles a little.
   const hiss = ctx.createBufferSource();
@@ -244,19 +186,19 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
   let stale = false;
 
   const t0 = ctx.currentTime;
-  saw.start(t0);
-  square.start(t0);
   hiss.start(t0);
   wobble.start(t0);
 
   return {
     update(car, throttle, drifting, now) {
       stale = true;
-      const f = engineFrequency(car.rpm, drifting);
-      saw.frequency.setTargetAtTime(f, now, E.pitchTau);
-      square.frequency.setTargetAtTime(f, now, E.pitchTau);
-      lowpass.frequency.setTargetAtTime(engineCutoff(car.rpm, throttle), now, E.levelTau);
-      engineGain.gain.setTargetAtTime(engineLevel(car.rpm, throttle), now, E.levelTau);
+      const dt = lastAt === null ? 0 : clamp(now - lastAt, 0, MAX_STEP);
+      lastAt = now;
+      const step = stepGearbox(gearbox, { speed: car.speed, throttle, drifting }, dt, preset.gearbox);
+      gearbox = step.state;
+      if (step.shift !== 0) engine.shift(step.shift, now);
+      // Clutch out (up-shift): the throttle is lifted for a moment, so the voice darkens briefly.
+      engine.set(gearbox.rev, gearbox.clutch > 0 ? unit(throttle) * SHIFT_LIFT : unit(throttle), now);
       const k = screechIntensity(car, drifting);
       screechGain.gain.setTargetAtTime(k * S.level, now, S.tau);
       if (k > 0) {
@@ -267,13 +209,12 @@ export function createLoopVoices(ctx: BaseAudioContext, out: AudioNode, noise: A
     },
     setActive(next, now, cut = false) {
       if (next) {
-        // Back from silence: start at idle, not at the last race's pitch / screech.
+        // Back from silence: start at idle in first gear, not at the last race's pitch / screech.
         if (stale && !on && now >= silentAt) {
           stale = false;
-          hardSet(saw.frequency, E.idleHz, now);
-          hardSet(square.frequency, E.idleHz, now);
-          hardSet(lowpass.frequency, E.cutoffBaseHz, now);
-          hardSet(engineGain.gain, E.levelIdle, now);
+          gearbox = initialGearbox(preset.gearbox);
+          lastAt = null;
+          engine.reset(now);
           hardSet(screechGain.gain, 0, now);
         }
         bus.gain.setTargetAtTime(1, now, BUS_TAU);
