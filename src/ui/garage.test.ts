@@ -44,12 +44,22 @@ describe('garage UI (jsdom)', () => {
   };
 
   describe('rules modal', () => {
-    it('says that a respawn burns the chain and how S / throttle work in a drift', () => {
+    it('explains the drift controls of scheme A (design spec §2.3) and what burns the chain', () => {
       mount();
-      const text = norm(openRules().textContent);
+      const modal = openRules();
+      const drift = [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
+      expect(drift).toEqual([
+        'В заносе',
+        'W держит занос, отпустите газ — выход',
+        'AD внутрь — круче, наружу — прямее',
+        'Полный контрруль ~0,3 с — поймать занос и выровняться',
+        'S тормоз и выход из заноса',
+        'Пробел + обратный руль — перекладка',
+      ]);
+      const text = norm(modal.textContent);
       expect(text).toContain('Сильный удар или возврат на трассу (R) сжигают цепочку');
-      expect(text).toContain('S в заносе — тормоз и выход из заноса');
-      expect(text).toContain('отпустите газ — машина выравнивается');
+      // The arc control lives in the drift list now, not repeated in the scoring rules.
+      expect(text).not.toContain('Руль внутрь');
     });
 
     it('is labelled by its title', () => {
