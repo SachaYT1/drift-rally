@@ -20,7 +20,7 @@ import { interpolateCar } from './interpolate';
 import { hintVisible, hudViewOf, parkedCar } from './raceView';
 import { inputOnPause, inputOnResume, type PauseCause } from './pauseInput';
 import type { RaceFrame } from './raceScene';
-import { applyRaceResult, bestLapSeconds, type SaveOutcome } from './saveResult';
+import { bestLapSeconds, recordRaceResult, type SaveOutcome } from './saveResult';
 
 /** Driving input for one fixed step. */
 export type InputSource = (st: Readonly<SessionState>) => InputFrame;
@@ -170,10 +170,9 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   function onFinish(result: RaceResult): void {
     if (finished) return;
     finished = true;
-    // Saved once, at the finish; quitting earlier forfeits (design spec §2.5).
-    const save = applyRaceResult(app.save, result);
-    app.setSave(save.save);
-    outcome = { result, save };
+    // Saved once, at the finish; quitting earlier forfeits (design spec §2.5). Applied to the save as stored
+    // now: another tab may have raced since this one loaded, and its coins and records must survive.
+    outcome = { result, save: recordRaceResult(app, result) };
     audio.setEngineActive(false);
     hudTick(session.state(), 0, true);
     resultsTimer = window.setTimeout(showResultsNow, RESULTS_DELAY_MS);

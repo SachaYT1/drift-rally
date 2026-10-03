@@ -8,7 +8,7 @@ import type { Track } from '../track/build';
 import type { GarageScene } from '../render/garageScene';
 import type { GameAudio } from '../audio/sfx';
 import type { InputController } from '../core/input';
-import { writeSave } from '../core/save';
+import { SAVE_KEY, readSave, updateSave } from '../core/save';
 import { isQualityLevel, pixelRatioFor } from '../core/quality';
 import type { RaceScene } from './raceScene';
 
@@ -51,9 +51,19 @@ export interface App {
   readonly audio: GameAudio;
   readonly input: InputController;
   readonly test: TestFlags;
+  /**
+   * Progress (coins, records) as stored, kept current across tabs by the 'storage' event; settings (quality,
+   * muted) are this tab's live state.
+   */
   readonly save: SaveData;
-  /** Replace the save and persist it (storage failures are ignored: the game keeps running). */
-  setSave(next: SaveData): void;
+  /**
+   * Read-modify-write on the save as stored NOW (another tab may have written since this one loaded): `change`
+   * gets the stored save (this tab's copy when storage is unreachable); the result is persisted and adopted,
+   * except its settings: change those with setQuality / setMuted. Storage failures are ignored.
+   */
+  updateSave(change: (current: SaveData) => SaveData): SaveData;
+  /** Called after app.save's progress changed (this tab's writes and other tabs'); returns the unsubscribe. */
+  onSaveChanged(cb: (save: Readonly<SaveData>) => void): () => void;
   readonly quality: QualityLevel;
   /** Apply a quality preset (pixel ratio, shadows) and persist it. */
   setQuality(q: QualityLevel): void;
@@ -86,6 +96,10 @@ export interface AppDeps {
   quality: QualityLevel;
   /** Quality is a test override: apply it, never persist it. */
   qualityOverride: boolean;
+  /** Where the save is stored (default localStorage; null: nowhere, progress lives in memory only). */
+  storage?: Storage | null;
+  /** Where other tabs' 'storage' events arrive (default window). */
+  storageEvents?: EventTarget;
 }
 
 /** Drawing-buffer size for a canvas of w x h CSS px (bounded in small test mode). */
@@ -119,6 +133,11 @@ export function watchPixelRatio(win: Pick<Window, 'devicePixelRatio' | 'matchMed
   return () => query?.removeEventListener('change', fire);
 }
 
+/** Coins and records equal (settings aside). */
+function sameProgress(a: Readonly<SaveData>, b: Readonly<SaveData>): boolean {
+  return a.coins === b.coins && a.bestScore === b.bestScore && a.bestLapMs === b.bestLapMs;
+}
+
 /** Make three re-evaluate the shader program of every material under `root` on its next use. */
 function refreshMaterials(root: THREE.Object3D): void {
   root.traverse((o) => {
@@ -132,6 +151,9 @@ export function createApp(d: AppDeps): App {
   let save = d.save;
   let quality = d.quality;
   const hooks = new Set<() => void>();
+  const saveListeners = new Set<(save: Readonly<SaveData>) => void>();
+  /** The last write failed (storage full or gone): this tab's save is ahead of the stored one. */
+  let unwritten = false;
   let fps = 0;
   let frames = 0;
   let windowStart = -1;
@@ -139,6 +161,27 @@ export function createApp(d: AppDeps): App {
   let appliedDpr = 0;
 
   d.audio.setMuted(save.muted);
+
+  /** Adopt a stored save as app.save, keeping this tab's live settings; tell the listeners if progress moved. */
+  function adopt(stored: SaveData): void {
+    const prev = save;
+    save = { ...stored, quality: prev.quality, muted: prev.muted };
+    if (!sameProgress(prev, save)) for (const cb of [...saveListeners]) cb(save);
+  }
+
+  /** Write one setting into the stored save (nothing else of it) and into this tab's settings. */
+  function patchSetting(patch: Partial<Pick<SaveData, 'quality' | 'muted'>>): void {
+    save = { ...save, ...patch };
+    app.updateSave((current) => ({ ...current, ...patch }));
+  }
+
+  // Another tab saved (a finished race, a setting) or cleared the storage: follow its progress.
+  (d.storageEvents ?? window).addEventListener('storage', (e) => {
+    const key = 'key' in e ? e.key : null;
+    if (key !== null && key !== SAVE_KEY) return;
+    const stored = readSave(d.storage);
+    if (stored) adopt(stored);
+  });
 
   const app: App = {
     renderer: d.renderer,
@@ -153,9 +196,15 @@ export function createApp(d: AppDeps): App {
     get save() {
       return save;
     },
-    setSave(next) {
-      save = next;
-      writeSave(next);
+    updateSave(change) {
+      const next = updateSave(change, save, d.storage, unwritten);
+      unwritten = !next.written;
+      adopt(next.save);
+      return save;
+    },
+    onSaveChanged(cb) {
+      saveListeners.add(cb);
+      return () => saveListeners.delete(cb);
     },
     get quality() {
       return quality;
@@ -171,12 +220,12 @@ export function createApp(d: AppDeps): App {
         refreshMaterials(scene);
         d.renderer.compileAsync(scene, camera).catch((err: unknown) => console.warn('Shader precompile failed:', err));
       }
-      if (!d.qualityOverride) app.setSave({ ...save, quality: q });
+      if (!d.qualityOverride) patchSetting({ quality: q });
       app.resize();
     },
     setMuted(m) {
       d.audio.setMuted(m);
-      if (m !== save.muted) app.setSave({ ...save, muted: m });
+      if (m !== save.muted) patchSetting({ muted: m });
     },
     screen: 'loading',
     redraw: null,

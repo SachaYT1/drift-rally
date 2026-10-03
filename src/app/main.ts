@@ -139,6 +139,10 @@ async function boot(): Promise<void> {
     qualityOverride: forced !== null,
   });
   const appRef = app;
+  // The garage shows another tab's coins as they arrive: count them as shown, so they do not pop again later.
+  appRef.onSaveChanged((s) => {
+    if (garageScreen) lastShownSave = s;
+  });
   appRef.resize();
   new ResizeObserver(() => appRef.resize()).observe(canvas);
   watchPixelRatio(window, () => appRef.resize());

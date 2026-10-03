@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRaceResult, bestLapSeconds } from './saveResult';
+import { applyRaceResult, bestLapSeconds, recordRaceResult } from './saveResult';
 import { DEFAULT_SAVE } from '../core/save';
 import type { RaceResult, SaveData } from '../shared/types';
 
@@ -77,5 +77,22 @@ describe('bestLapSeconds', () => {
   it('converts ms to seconds and maps a missing record to null', () => {
     expect(bestLapSeconds(save({ bestLapMs: 63_123 }))).toBeCloseTo(63.123, 9);
     expect(bestLapSeconds(save())).toBeNull();
+  });
+});
+
+describe('recordRaceResult', () => {
+  it('applies the result to the save stored NOW (another tab raced since) and compares records against it', () => {
+    let stored = save({ coins: 80, bestScore: 20_000, bestLapMs: 70_000, muted: true });
+    const store = {
+      updateSave(change: (current: SaveData) => SaveData): SaveData {
+        stored = change(stored);
+        return stored;
+      },
+    };
+    const out = recordRaceResult(store, result());
+    expect(stored).toEqual(save({ coins: 132, bestScore: 20_000, bestLapMs: 63_123, muted: true }));
+    expect(out.save).toEqual(stored);
+    expect(out.newBest).toBe(false);
+    expect(out.newBestLap).toBe(true);
   });
 });

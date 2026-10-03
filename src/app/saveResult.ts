@@ -1,6 +1,6 @@
 /**
  * Applying a finished race to the save (design spec §2.5, §5 Save). Saved on finish only: quitting
- * mid-race forfeits. Pure: returns a new SaveData, never mutates the input.
+ * mid-race forfeits. applyRaceResult is pure: returns a new SaveData, never mutates the input.
  */
 import type { RaceResult, SaveData } from '../shared/types';
 
@@ -37,6 +37,25 @@ export function applyRaceResult(save: Readonly<SaveData>, r: Readonly<RaceResult
     newBest,
     newBestLap,
   };
+}
+
+/** Where the save lives: a read-modify-write on the save as stored now (App.updateSave). */
+export interface SaveStore {
+  updateSave(change: (current: SaveData) => SaveData): SaveData;
+}
+
+/**
+ * Applies a finished race to the save as stored NOW, not to the copy this tab loaded: another tab may have
+ * raced (or changed a setting) since. newBest / newBestLap compare against that stored save.
+ */
+export function recordRaceResult(store: SaveStore, r: Readonly<RaceResult>): SaveOutcome {
+  const applied: { outcome: SaveOutcome | null } = { outcome: null };
+  store.updateSave((current) => {
+    applied.outcome = applyRaceResult(current, r);
+    return applied.outcome.save;
+  });
+  if (applied.outcome === null) throw new Error('updateSave did not apply the race result');
+  return applied.outcome;
 }
 
 /** Saved best lap (ms) as the session's seed record (seconds), or null. */

@@ -15,19 +15,44 @@ export const DEFAULT_SAVE: Readonly<SaveData> = Object.freeze({
 
 /**
  * Load the save. `storage` defaults to `localStorage`; pass `null` for "no storage".
- * Missing/unavailable storage, corrupt JSON or a different version → defaults.
+ * Missing/unavailable/unreadable storage, corrupt JSON or a different version → defaults.
  * Individually invalid fields fall back to their defaults; valid fields are kept.
  */
 export function loadSave(storage?: Storage | null): SaveData {
+  return readSave(storage) ?? { ...DEFAULT_SAVE };
+}
+
+/**
+ * The save as stored right now, or null when storage is unavailable or unreadable (the caller keeps its own
+ * copy then). A missing, corrupt or other-version record reads as the defaults, like loadSave().
+ */
+export function readSave(storage?: Storage | null): SaveData | null {
   const store = resolveStorage(storage);
-  if (store === null) return { ...DEFAULT_SAVE };
+  if (store === null) return null;
+  let raw: string | null;
   try {
-    const raw = store.getItem(SAVE_KEY);
-    return raw === null ? { ...DEFAULT_SAVE } : sanitize(JSON.parse(raw));
+    raw = store.getItem(SAVE_KEY);
   } catch {
-    // Corrupt JSON or storage access denied (e.g. SecurityError): fall back to defaults.
-    return { ...DEFAULT_SAVE };
+    return null;
   }
+  return parseSave(raw);
+}
+
+/**
+ * Read-modify-write. Another tab may have saved since this one loaded, so `change` is applied to the save as
+ * stored NOW and the result is written back. `fallback` (the caller's in-memory copy) is the base instead
+ * when storage is unreachable, or when `fromFallback` says it is ahead of storage (an earlier write failed).
+ * Never throws: `written` is false when the write failed and the game keeps running on `save`.
+ */
+export function updateSave(
+  change: (current: SaveData) => SaveData,
+  fallback: Readonly<SaveData>,
+  storage?: Storage | null,
+  fromFallback = false,
+): { save: SaveData; written: boolean } {
+  const store = resolveStorage(storage);
+  const next = change((fromFallback ? null : readSave(store)) ?? { ...fallback });
+  return { save: next, written: writeSave(next, store) };
 }
 
 /** Returns false when storage is unavailable or full. */
@@ -60,6 +85,16 @@ function resolveStorage(storage: Storage | null | undefined): Storage | null {
     return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
     return null;
+  }
+}
+
+/** A stored record (null: none) as a save; corrupt JSON → defaults. */
+function parseSave(raw: string | null): SaveData {
+  if (raw === null) return { ...DEFAULT_SAVE };
+  try {
+    return sanitize(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_SAVE };
   }
 }
 
