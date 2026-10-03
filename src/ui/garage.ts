@@ -1,8 +1,10 @@
 /** Minimal garage overlay: top bar, car card with stats, track card with CTA, rules/records modals. */
 import type { SaveData } from '../shared/types';
+import type { LeaderboardPort } from '../shared/leaderboard';
 import { TUNING } from '../shared/tuning';
 import { formatPoints, formatTime, pluralRu } from './format';
-import { COIN_HTML, LOGO_HTML, createLayer, isInteractiveTarget, keyHtml, play, qs } from './screens';
+import { mountFriends, type FriendsView } from './leaderboardView';
+import { COIN_HTML, LOGO_HTML, createLayer, escapeHtml, isInteractiveTarget, isTextField, keyHtml, play, qs } from './screens';
 
 export interface GarageUI {
   /** New save: coins pop in the wallet, records and the sound toggle follow it. */
@@ -29,10 +31,6 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tab
 /** Speaker; the waves show while sound is on, the cross while muted (styles.css keys off aria-checked). */
 const SOUND_SVG =
   '<svg viewBox="0 0 24 24" width="1.25em" height="1.25em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><g class="dr-sound__on"><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/></g><g class="dr-sound__off"><path d="m15.5 9.5 5 5m0-5-5 5"/></g></svg>';
-
-function escapeText(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
 
 function statsHtml(): string {
   return CAR_STATS.map(
@@ -87,12 +85,18 @@ function rulesHtml(): string {
     </div>`;
 }
 
-function recordsHtml(save: SaveData): string {
+/** The records modal: personal records, then the friends table (filled by mountFriends) when there is one. */
+function recordsHtml(save: SaveData, friends: boolean): string {
+  return `<h2 class="dr-h dr-modal__title" id="${MODAL_TITLE_ID}">Рекорды</h2>
+    <div data-ref="personal">${personalHtml(save)}</div>
+    ${friends ? '<section class="dr-friends" data-ref="friends"></section>' : ''}`;
+}
+
+function personalHtml(save: SaveData): string {
   const hasRun = save.bestScore > 0 || save.bestLapMs !== null;
   const best = hasRun ? formatPoints(save.bestScore) : '—';
   const lap = save.bestLapMs === null ? '—' : formatTime(save.bestLapMs / 1000);
-  return `<h2 class="dr-h dr-modal__title" id="${MODAL_TITLE_ID}">Рекорды</h2>
-    <div class="dr-records">
+  return `<div class="dr-records">
       <div class="dr-tile"><span class="dr-eyebrow">Лучший счёт</span><b class="dr-num">${best}</b></div>
       <div class="dr-tile"><span class="dr-eyebrow">Лучший круг</span><b class="dr-num">${lap}</b></div>
       <div class="dr-tile"><span class="dr-eyebrow">Монеты</span><b class="dr-num">${COIN_HTML}${formatPoints(save.coins)}</b></div>
@@ -108,6 +112,8 @@ export function createGarageUI(
     onStart(): void;
     /** The sound toggle or M flipped mute (the UI already shows the new state). */
     onMute(muted: boolean): void;
+    /** Friends table in «Рекорды»; null / omitted: personal records only. */
+    leaderboard?: LeaderboardPort | null;
   },
 ): GarageUI {
   const laps = TUNING.race.laps;
@@ -134,7 +140,7 @@ export function createGarageUI(
     </section>
     <section class="dr-panel dr-track">
       <div class="dr-eyebrow">Трасса</div>
-      <div class="dr-h dr-track__name">${escapeText(opts.trackName)} <span>· 1</span></div>
+      <div class="dr-h dr-track__name">${escapeHtml(opts.trackName)} <span>· 1</span></div>
       <div class="dr-track__meta">${laps} ${pluralRu(laps, LAP_FORMS)} · дрифт на очки</div>
       <div class="dr-track__best"><span class="dr-eyebrow">Рекорд</span><b class="dr-track__score dr-num"></b></div>
       <button type="button" class="dr-cta">В заезд<span class="dr-cta__arrows" aria-hidden="true"><i>›</i><i>›</i><i>›</i></span></button>
@@ -156,6 +162,8 @@ export function createGarageUI(
   let started = false;
   /** `refocus`: the modal was opened from the keyboard, so focus goes back to its opener on close. */
   let modal: { kind: ModalKind; el: HTMLElement; body: HTMLElement; opener: HTMLElement; refocus: boolean } | null = null;
+  /** The friends table of the open records modal. */
+  let friends: FriendsView | null = null;
 
   function renderSound(): void {
     soundBtn.setAttribute('aria-checked', String(!muted));
@@ -173,7 +181,8 @@ export function createGarageUI(
     walletN.textContent = formatPoints(save.coins);
     bestScore.textContent = save.bestScore > 0 ? formatPoints(save.bestScore) : '—';
     if (prevCoins !== null && save.coins !== prevCoins) play(wallet, POP, { duration: 420, easing: 'ease-out' });
-    if (modal?.kind === 'records') modal.body.innerHTML = recordsHtml(save);
+    // Only the personal tiles: the friends table may hold a nick being typed.
+    if (modal?.kind === 'records') qs(modal.body, '[data-ref="personal"]').innerHTML = personalHtml(save);
   }
 
   /** Drop focus from any garage control so a page-level Enter reaches the start handler. */
@@ -186,6 +195,8 @@ export function createGarageUI(
     if (!modal) return;
     const { el, opener, refocus } = modal;
     modal = null;
+    friends?.destroy();
+    friends = null;
     el.remove();
     for (const b of background) b.removeAttribute('inert');
     for (const b of navButtons) b.classList.remove('is-open');
@@ -205,7 +216,9 @@ export function createGarageUI(
     el.innerHTML = `<div class="dr-dim" data-close></div>
       <div class="dr-panel dr-modal__card"><button type="button" class="dr-close" aria-label="Закрыть" data-close></button><div class="dr-modal__body"></div></div>`;
     const body = qs(el, '.dr-modal__body');
-    body.innerHTML = kind === 'rules' ? rulesHtml() : recordsHtml(save);
+    const board = kind === 'records' ? (opts.leaderboard ?? null) : null;
+    body.innerHTML = kind === 'rules' ? rulesHtml() : recordsHtml(save, board !== null);
+    if (board) friends = mountFriends(qs(body, '[data-ref="friends"]'), board);
     for (const b of background) b.setAttribute('inert', '');
     layer.appendChild(el);
     modal = { kind, el, body, opener, refocus };
@@ -259,7 +272,7 @@ export function createGarageUI(
       return;
     }
     if (e.repeat) return;
-    if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTextField(e.target)) {
       toggleMute();
     } else if (e.code === 'Escape' && modal) {
       e.preventDefault();
@@ -281,6 +294,8 @@ export function createGarageUI(
     },
     destroy(): void {
       window.removeEventListener('keydown', onKey);
+      friends?.destroy();
+      friends = null;
       modal = null;
       layer.remove();
     },

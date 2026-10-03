@@ -8,6 +8,7 @@ import type { QualityLevel, SaveData } from '../shared/types';
 import { loadSave } from '../core/save';
 import { detectQuality } from '../core/quality';
 import { createInput } from '../core/input';
+import { createLeaderboardApi } from '../core/leaderboardApi';
 import { createAudio } from '../audio/sfx';
 import { prewarmAudioOutput } from '../audio/prewarm';
 import { buildTrack } from '../track/build';
@@ -19,6 +20,7 @@ import { compileAndPrewarm, loadScenes } from './loading';
 import { enterGarage, type GarageScreen } from './garageScreen';
 import { enterRace, type RaceScreen } from './raceScreen';
 import { installTestHook } from './testHook';
+import { createLeaderboard } from './leaderboard';
 
 declare global {
   interface Window {
@@ -122,6 +124,8 @@ async function boot(): Promise<void> {
   });
 
   const loading = showLoading(ui);
+  // Reads app.save once the app exists (the boot save before that).
+  const leaderboard = createLeaderboard({ api: createLeaderboardApi(), save: () => app?.save ?? save });
   const track = buildTrack(PLAZA);
   const scenes = await loadScenes(renderer, track, quality, (f) => loading.setProgress(f));
   app = createApp({
@@ -137,7 +141,10 @@ async function boot(): Promise<void> {
     save,
     quality,
     qualityOverride: forced !== null,
+    leaderboard,
   });
+  // Finishes an earlier session could not send (offline, paused project).
+  void leaderboard.flush();
   const appRef = app;
   // The garage shows another tab's coins as they arrive: count them as shown, so they do not pop again later.
   appRef.onSaveChanged((s) => {
