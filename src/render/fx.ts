@@ -3,9 +3,10 @@
  * - Smoke / bursts: pooled camera-facing quads, one instanced draw each (unlit ShaderMaterial, per-instance
  *   position, colour+alpha, size; bursts stretch along screen-space velocity). Live particles are packed to the
  *   front of the buffers: instanceCount = live count, only that range is uploaded. depthWrite false.
- * - Skid marks: ring buffer of SKID_CAPACITY quads shared by the rear wheel pair (preallocated, DynamicDrawUsage,
- *   addUpdateRange per frame, y 0.07, polygonOffset, depthWrite false). Each rear wheel lays a continuous strip
- *   while sliding; grip, 'respawn' or a teleport break it.
+ * - Skid marks (skidMarks.ts): ring buffer of quads shared by the rear wheel pair (preallocated, DynamicDrawUsage,
+ *   update ranges queued until uploaded, y 0.07, polygonOffset, depthWrite false). Each rear wheel lays a
+ *   continuous strip while sliding; grip, 'respawn' or a teleport break it. update() may run several times per
+ *   rendered frame (e.g. once per fixed step).
  * Transparent draw order: skid marks (-2), particles (-1), then other transparents (fading occluders blend over).
  * Idle meshes stay visible with an empty draw range (frustumCulled false), so renderer.compile() during loading
  * prepares their programs. update() / onEvent() do not allocate; dt <= 0 (pause) freezes everything.
@@ -15,6 +16,7 @@ import type { CarState, GameEvent, SurfaceKind } from '../shared/types';
 import { TUNING } from '../shared/tuning';
 import { DEG, TAU, clamp, damp, seededRandom } from '../shared/math';
 import { COIN_CENTER_Y } from './props';
+import { SkidMarks, type Trail } from './skidMarks';
 
 export interface Fx {
   /** Smoke from rear wheels when drifting or hard braking; skid marks while sliding. `car` = render state. */
@@ -28,13 +30,6 @@ export interface Fx {
 // ---- Visual-only constants (not gameplay tuning) ----
 const SMOKE_CAPACITY = 200;
 const BURST_CAPACITY = 192;
-/** Skid-mark quads shared by both rear wheels (ring buffer). */
-const SKID_CAPACITY = 2000;
-const SKID_Y = 0.07;
-const SKID_HALF_WIDTH = 0.2;
-/** Minimum strip segment, m; a wheel jump longer than SKID_BREAK (teleport) starts a new strip. */
-const SKID_SEGMENT = 0.45;
-const SKID_BREAK = 4;
 /** Slide intensity needed to mark, peak mark alpha, and mark strength per surface. */
 const SKID_MIN = 0.12;
 const SKID_ALPHA = 0.55;
@@ -58,7 +53,7 @@ const BURST_STRETCH = 0.06;
 const MAX_DT = 0.1;
 /** Skid-mark and particle colours (read-only). */
 const C = {
-  skid: new THREE.Color(0x26232a), smoke: new THREE.Color(0xf4f2f5), dust: new THREE.Color(0xe6dccb), hot: new THREE.Color(0xffd84a),
+  smoke: new THREE.Color(0xf4f2f5), dust: new THREE.Color(0xe6dccb), hot: new THREE.Color(0xffd84a),
   cool: new THREE.Color(0xff5a0a), gold: new THREE.Color(0xffcf3a), pale: new THREE.Color(0xfff3c4),
 };
 
@@ -208,94 +203,6 @@ class ParticlePool {
     for (let o = 0; o < this.state.length; o += STRIDE) this.state[o + LIFE] = 0;
     this.mesh.geometry.instanceCount = 0;
     this.dirty = false;
-  }
-}
-
-/** Marks `count` quads from ring slot `start` (wrapping) for upload; a full lap uploads everything. */
-function uploadRing(attr: THREE.BufferAttribute, perQuad: number, start: number, count: number): void {
-  attr.clearUpdateRanges();
-  if (count < SKID_CAPACITY) {
-    const first = Math.min(count, SKID_CAPACITY - start);
-    attr.addUpdateRange(start * perQuad, first * perQuad);
-    if (first < count) attr.addUpdateRange(0, (count - first) * perQuad);
-  }
-  attr.needsUpdate = true;
-}
-
-/** Skid strip of one wheel: last point, its left/right edge, mark alpha; `edged` false until a segment sets the direction. */
-type Trail = { active: boolean; edged: boolean; x: number; z: number; lx: number; lz: number; rx: number; rz: number; alpha: number };
-/** Quad q = vertices 4q..4q+3 (start left, start right, end right, end left) as triangles 012, 023. */
-const QUAD = [0, 1, 2, 0, 2, 3];
-
-class SkidMarks {
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
-  private readonly pos: THREE.BufferAttribute;
-  private readonly col: THREE.BufferAttribute;
-  /** Quads written since the last clear (slot = written % capacity) and at the last flush. */
-  private written = 0;
-  private flushed = 0;
-
-  constructor() {
-    this.pos = new THREE.BufferAttribute(new Float32Array(SKID_CAPACITY * 12), 3).setUsage(THREE.DynamicDrawUsage);
-    this.col = new THREE.BufferAttribute(new Float32Array(SKID_CAPACITY * 16).fill(1), 4).setUsage(THREE.DynamicDrawUsage);
-    const index = new Uint16Array(SKID_CAPACITY * 6).map((_, i) => 4 * Math.floor(i / 6) + QUAD[i % 6]);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', this.pos);
-    geo.setAttribute('color', this.col);
-    geo.setIndex(new THREE.BufferAttribute(index, 1));
-    geo.setDrawRange(0, 0);
-    const material = new THREE.MeshBasicMaterial({
-      color: C.skid, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
-    });
-    this.mesh = Object.assign(new THREE.Mesh(geo, material), { name: 'fx-skidmarks', frustumCulled: false, renderOrder: -2 });
-  }
-
-  /** Extends `t` to the wheel position (x, z) with mark alpha `alpha` (0 = break the strip). */
-  extend(t: Trail, x: number, z: number, alpha: number): void {
-    const dx = x - t.x, dz = z - t.z;
-    const len = Math.hypot(dx, dz);
-    if (alpha <= 0 || !t.active || len > SKID_BREAK) {
-      t.active = alpha > 0;
-      t.edged = false;
-      t.x = x; t.z = z; t.alpha = alpha;
-      return;
-    }
-    if (len < SKID_SEGMENT) return;
-    // Half-width edge across the travel direction: left = (dz, -dx) / len.
-    const ex = (dz / len) * SKID_HALF_WIDTH;
-    const ez = (-dx / len) * SKID_HALF_WIDTH;
-    if (!t.edged) {
-      t.lx = t.x + ex; t.lz = t.z + ez; t.rx = t.x - ex; t.rz = t.z - ez;
-    }
-    const slot = this.written++ % SKID_CAPACITY;
-    const p = this.pos.array;
-    const v = slot * 12;
-    p[v] = t.lx; p[v + 1] = SKID_Y; p[v + 2] = t.lz;
-    p[v + 3] = t.rx; p[v + 4] = SKID_Y; p[v + 5] = t.rz;
-    p[v + 6] = x - ex; p[v + 7] = SKID_Y; p[v + 8] = z - ez;
-    p[v + 9] = x + ex; p[v + 10] = SKID_Y; p[v + 11] = z + ez;
-    const c = this.col.array;
-    c[slot * 16 + 3] = c[slot * 16 + 7] = t.alpha;
-    c[slot * 16 + 11] = c[slot * 16 + 15] = alpha;
-    t.edged = true; t.x = x; t.z = z; t.alpha = alpha;
-    t.lx = x + ex; t.lz = z + ez; t.rx = x - ex; t.rz = z - ez;
-  }
-
-  /** Uploads the quads written since the last flush. */
-  flush(): void {
-    const count = this.written - this.flushed;
-    if (count === 0) return;
-    const start = this.flushed % SKID_CAPACITY;
-    this.flushed = this.written;
-    uploadRing(this.pos, 12, start, count);
-    uploadRing(this.col, 16, start, count);
-    this.mesh.geometry.setDrawRange(0, Math.min(this.written, SKID_CAPACITY) * 6);
-  }
-
-  clear(): void {
-    this.written = this.flushed = 0;
-    this.mesh.geometry.setDrawRange(0, 0);
   }
 }
 

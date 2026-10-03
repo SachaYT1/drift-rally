@@ -133,6 +133,45 @@ describe('fx', () => {
     expect(longestSkidEdge(scene)).toBeLessThan(3);
   });
 
+  it('keeps every skid quad written between two renders queued for upload (several updates per frame)', () => {
+    const scene = new THREE.Scene();
+    const fx = createFx(scene);
+    const car = makeDriver(20, 0.6, 'drift');
+    const attrs = (['position', 'color'] as const).map((k) => mesh(scene, 'fx-skidmarks').geometry.getAttribute(k));
+    /** Element indices [lo, hi) covered by the pending update ranges of `a`. */
+    const covered = (a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute) => {
+      const ranges = (a as THREE.BufferAttribute).updateRanges.map((r) => [r.start, r.start + r.count]).sort((p, q) => p[0] - q[0]);
+      let hi = 0;
+      for (const [s, e] of ranges) if (s <= hi) hi = Math.max(hi, e);
+      return hi;
+    };
+    /** What three does after uploading an attribute: clear its ranges, then call onUpload. */
+    const upload = () => {
+      for (const a of attrs) {
+        (a as THREE.BufferAttribute).clearUpdateRanges();
+        (a as THREE.BufferAttribute).onUploadCallback();
+      }
+    };
+    // One fx.update per fixed step (120 Hz) and no render in between: no quad may be dropped.
+    for (let i = 0; i < 240; i++) fx.update(car.step(DT / 2), 'road', DT / 2);
+    const quads = skidQuads(scene);
+    expect(quads).toBeGreaterThan(20);
+    expect(covered(attrs[0])).toBe(quads * 12);
+    expect(covered(attrs[1])).toBe(quads * 16);
+
+    // After an upload only the newer quads are queued.
+    upload();
+    for (let i = 0; i < 20; i++) fx.update(car.step(DT / 2), 'road', DT / 2);
+    const ranges = (attrs[0] as THREE.BufferAttribute).updateRanges;
+    expect(ranges.length).toBeGreaterThan(0);
+    expect(Math.min(...ranges.map((r) => r.start))).toBe(quads * 12);
+
+    // reset() drops the queue: new marks start at slot 0 and are queued from there.
+    fx.reset();
+    for (let i = 0; i < 60; i++) fx.update(car.step(DT), 'road', DT);
+    expect(covered(attrs[0])).toBe(skidQuads(scene) * 12);
+  });
+
   it('bursts sparks on hits and gold on coins, then clears', () => {
     const scene = new THREE.Scene();
     const fx = createFx(scene);
