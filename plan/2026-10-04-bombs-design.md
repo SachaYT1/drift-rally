@@ -32,7 +32,8 @@
 
 Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a hazard with physics.
 
-- `BombState { blown: ReadonlySet<string> }`, `createBombs()`, `resetBombs()` (new lap: all back).
+- `BombState { blown: ReadonlySet<string> }`, `createBombs()`, `resetBombs(state)` (new lap: all back; the
+  same object when none was blown).
 - `updateBombs(state, track, car, t) -> { state, car, events, blasted: boolean }`: every bomb overlapping the
   car capsule (not yet blown) is marked blown and emits `bomb`; the blast impulse is applied once per step,
   from the touched bomb nearest the car centre. Non-finite car positions trigger nothing.
@@ -44,9 +45,9 @@ Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a h
   the centres (nearly) coincide, `n` is the car's left or right vector, away from the bomb's side (left when
   exactly centred).
 - Spin by where the bomb sits under the body (body frame: `lon` along forward, `lat` along left): the end of
-  the car over the bomb is thrown away from it, so `yawRate += yawKick * sign(lat) * sign(lon)` (bomb under
-  the front left -> nose kicked right; under the rear left -> nose swings left); no kick when `lat` or `lon`
-  is 0.
+  the car over the bomb is thrown away from it, so `yawRate -= yawKick * sign(lat) * sign(lon)` (+yaw = left;
+  bomb under the front left -> nose kicked right; under the rear left -> nose swings left); no kick when `lat`
+  or `lon` is 0.
 - The car enters `recover` exactly as after a heavy hit: `mode: 'recover'`, `modeTimer: drift.recoverTime`,
   `driftDir: 0`, and leaving a drift resets `driftTime` / `gripBlend`. That block of `collision.ts` `respond()`
   moves into a shared `enterRecover(state, t)` helper used by both.
@@ -79,9 +80,9 @@ Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a h
 
 ## Presentation
 
-- `render/procedural.ts`: `createBomb()`: black glossy sphere (r ≈ 0.8 m) on the road, metal collar, curved
-  fuse, a blinking emissive spark at its tip (no light source). Casts a shadow like the cans.
-- `render/bombs.ts`: one mesh per bomb; reads `RaceFrame.bombs` (the session's `BombState`), hides blown
+- `render/bombs.ts`: `createBomb(r)`: dark sphere (r = bomb radius) on the road, metal collar, curved fuse, a
+  blinking unlit spark at its tip (no light source); casts a shadow. The bombs layer (same file): one model per
+  bomb; reads `RaceFrame.bombs` (the session's `BombState`, optional: absent shows every bomb), hides blown
   bombs, shows them again when the state no longer lists them. `update()` does not allocate.
 - `render/fx.ts` on `bomb`: a short additive flash, a large burst of orange sparks (the hit spark pool), a
   couple of dark smoke puffs rising.
