@@ -71,7 +71,7 @@ describe('garage UI (jsdom)', () => {
         'Пробел + обратный руль — перекладка',
       ]);
       const text = norm(modal.textContent);
-      expect(text).toContain('Сильный удар или возврат на трассу (R) сжигают цепочку');
+      expect(text).toContain('Сильный удар, взрыв бомбы или возврат на трассу (R) сжигают цепочку');
       // The arc control lives in the drift list now, not repeated in the scoring rules.
       expect(text).not.toContain('Руль внутрь');
     });
