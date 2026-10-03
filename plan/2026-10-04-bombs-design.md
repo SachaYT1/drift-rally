@@ -3,9 +3,9 @@
 ## Player-facing behaviour
 
 - Cartoon bombs (black ball, fuse, blinking spark) stand on the road of «Площадь».
-- Driving over a bomb blows it up: the car is pushed away from the bomb, loses about half its speed, spins
-  a little and leaves the drift (the same recovery as after a heavy wall hit). The camera shakes, sparks and
-  smoke burst out, the body hops, a «бах» plays.
+- Driving over a bomb blows it up: the car is thrown sideways off its path (away from the bomb), loses about
+  half its speed, spins a little and leaves the drift (the same recovery as after a heavy wall hit). The
+  camera shakes, sparks and smoke burst out, the body hops, a «бах» plays.
 - The blast **burns the unbanked drift chain**, exactly like a heavy wall hit: «Сгорело −N» in the HUD,
   banked points untouched. With no chain open the blast only throws the car.
 - A blown bomb is gone for the rest of the lap and is back on the next lap (like cans and cups).
@@ -24,7 +24,7 @@
 - `shared/tuning.ts`, new section `bomb` (tests read thresholds from it):
   - `radius` ≈ 0.8 m: trigger radius, tested against the car capsule (`BombSpot.r` = this);
   - `speedKeep` ≈ 0.45: share of the velocity kept;
-  - `push` ≈ 7 m/s: velocity added away from the bomb;
+  - `push` ≈ 7 m/s: velocity added across the path, away from the bomb;
   - `yawKick` ≈ 2.5 rad/s: spin added;
   - `shakeImpact` ≈ 14 m/s: the camera shakes as for a heavy hit at this impact speed.
 
@@ -41,9 +41,11 @@ Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a h
 
 ### `physics/blast.ts`: `applyBlast(car, bomb, t): CarState`
 
-- Velocity: `v' = v * speedKeep + n * push`, `n` = unit vector from the bomb centre to the car centre. When
-  the centres (nearly) coincide, `n` is the car's left or right vector, away from the bomb's side (left when
-  exactly centred).
+- Velocity: `v' = v * speedKeep + n * push`, `n` = the unit vector across the direction of travel (the body
+  heading below 1 m/s), pointing away from the bomb's side of the path (left when the bomb is dead ahead).
+  A push straight away from the bomb centre would bounce a car that runs into a bomb backwards (review
+  2026-10-04): across the path, the car keeps ~50-60 % of its speed at drift speeds and always goes forward.
+  Offsets under 1 µm count as on the axis, so rounding never picks a side.
 - Spin by where the bomb sits under the body (body frame: `lon` along forward, `lat` along left): the end of
   the car over the bomb is thrown away from it, so `yawRate -= yawKick * sign(lat) * sign(lon)` (+yaw = left;
   bomb under the front left -> nose kicked right; under the rear left -> nose swings left); no kick when `lat`
@@ -90,7 +92,8 @@ Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a h
   2D simulation is unchanged.
 - `app/raceScene.ts`: `chase.shake(camera.shakePerImpact * bomb.shakeImpact)` on `bomb`; the bombs layer joins
   `sync()` / `reset()`.
-- `app/loading.ts`: a fake `bomb` event during prewarm, so the first blast does not hitch on shader compile.
+- No extra prewarm: the blast reuses the hit / coin / smoke particle pools that loading already prewarms, and
+  the bomb models compile with the race scene.
 - `audio/sfx.ts`: `bomb` -> «бах»: a noise burst through a falling low-pass plus a low sine thump. The chain
   burn sound follows via `chainBurned` as today.
 - HUD: unchanged («Сгорело −N» comes from `chainBurned`).
@@ -100,8 +103,9 @@ Separate from `pickups.ts`: coins and props are rewards/penalties, a bomb is a h
 
 - `game/bombs.test.ts`: triggers on overlap, once per lap, back after `resetBombs`, nothing when far or with a
   non-finite car, one impulse when two bombs touch at once.
-- `physics/blast.test.ts`: pushed away from the bomb, speed reduced, `recover` and drift exit, spin sign for
-  front-left / rear-left / centred, coincident centres stay finite.
+- `physics/blast.test.ts`: thrown across the path away from the bomb, about half the speed kept and never
+  backwards, `recover` and drift exit, spin sign for front-left / rear-left / centred, the same result from
+  any heading, standing car and coincident centres stay finite.
 - `game/driftScore.test.ts`: `bombed` burns an `active` and a `grace` chain, nothing in `idle`, banked total kept.
 - Session: a drift into a bomb emits `bomb` then `chainBurned`, starts the wrong-way grace, the bomb is back
   on the next lap; a blast with no chain emits no `chainBurned`.

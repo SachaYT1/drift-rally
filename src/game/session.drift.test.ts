@@ -185,6 +185,8 @@ describe('session: drift score wiring', () => {
     expect(blast.st.bombs.blown.has('bomb-1')).toBe(true);
     expect(blast.st.score.totalPoints).toBe(blast.prev.score.totalPoints);
     expect(driveUntil(sess, true, has('bomb'), 5)).toBeNull(); // gone for the rest of the lap
+    sess.step(NEUTRAL_INPUT, { respawn: true }, DT);
+    expect(sess.state().bombs.blown.has('bomb-1')).toBe(true); // a respawn does not bring it back
   });
 
   it('a bomb comes back on the next lap; a blast with no chain open burns nothing', () => {

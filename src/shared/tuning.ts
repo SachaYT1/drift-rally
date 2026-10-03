@@ -250,7 +250,7 @@ export const TUNING = {
     radius: 0.8,
     /** Share of the car velocity kept through a blast. */
     speedKeep: 0.45,
-    /** Velocity added away from the bomb centre, m/s. */
+    /** Velocity added across the direction of travel, away from the bomb's side, m/s. */
     push: 7,
     /** Spin added by a bomb under one end of the car, rad/s. */
     yawKick: 2.5,

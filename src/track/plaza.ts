@@ -65,7 +65,8 @@ const LIGHT: LightPropDef[] = [
 
 /**
  * One bomb per long drift, on the inside of the corner 2.5 m off the centreline: the tight line passes over
- * it, the outside stays clear. Measured on the autopilot's drift line (it passes 1-3 m from each).
+ * it, the outside stays clear. A keyboard drift into the fountain sweeper (car.driftKeyboard.test.ts) runs
+ * over its bomb; the autopilot's own line passes 1.5-3.7 m from them (it steers around them anyway).
  */
 const BOMBS: BombDef[] = [
   // Zone 2: apex of the fountain sweeper (left), before the inner coin row.

@@ -107,6 +107,9 @@ describe('drift score', () => {
       expect(r.state).toMatchObject({ phase: 'idle', chainPoints: 0, multiplier: 1, totalPoints: banked.totalPoints });
     }
     expect(updateDriftScore(createDriftScore(), { ...base, bombed: true }, DT).events).toEqual([]);
+    // A heavy hit and a blast in the same step burn the chain once.
+    const both = updateDriftScore(active, { ...base, heavyHit: true, bombed: true }, DT);
+    expect(both.events).toEqual([{ type: 'chainBurned', points: Math.round(active.chainPoints) }]);
   });
 
   it('prop penalty hits the banked total, floored at 0, chain survives', () => {
