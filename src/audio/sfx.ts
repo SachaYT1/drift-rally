@@ -237,8 +237,8 @@ export function createSfxPlayer(
       tone({ type: 'sine', hz: 2870, peak: 0.08, attack: 0.002, release: 0.16 }, at);
       return;
     }
-    tone({ type: 'triangle', hz: 720, toHz: 480, peak: 0.16, attack: 0.002, release: 0.09 }, at);
-    hiss({ filter: 'bandpass', hz: 2600, q: 1.2, peak: 0.07, attack: 0.001, release: 0.03 }, at);
+    tone({ type: 'triangle', hz: 720, toHz: 480, peak: 0.22, attack: 0.002, hold: 0.01, release: 0.13 }, at);
+    hiss({ filter: 'bandpass', hz: 2600, q: 1.2, peak: 0.1, attack: 0.001, release: 0.04 }, at);
   }
 
   /**
