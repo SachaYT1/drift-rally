@@ -243,6 +243,7 @@ function stepRacing(
       progressSpeed: progress.progressSpeed,
       heavyHit,
       respawned,
+      bombed: false,
       propsKnocked: pu.knocked,
       finished: justFinished,
     },

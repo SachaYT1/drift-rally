@@ -5,7 +5,7 @@ import { DEG } from '../shared/math';
 import type { CarState, GameEvent } from '../shared/types';
 
 const DT = 1 / 120;
-const base: DriftScoreInput = { accruing: false, slip: 30 * DEG, progressSpeed: 20, heavyHit: false, respawned: false, propsKnocked: 0, finished: false };
+const base: DriftScoreInput = { accruing: false, slip: 30 * DEG, progressSpeed: 20, heavyHit: false, respawned: false, bombed: false, propsKnocked: 0, finished: false };
 
 function feed(state: DriftScoreState, seconds: number, input: Partial<DriftScoreInput>) {
   const events: GameEvent[] = [];
@@ -93,6 +93,20 @@ describe('drift score', () => {
       expect(r.state.totalPoints).toBe(0);
       expect(r.events.some((e) => e.type === 'chainBurned')).toBe(true);
     }
+  });
+
+  it('a bomb burns an active or a grace chain and keeps the banked total; nothing when idle', () => {
+    const banked = feed(feed(createDriftScore(), 1, { accruing: true }).s, TUNING.score.graceTime + 0.5, {}).s;
+    expect(banked.totalPoints).toBeGreaterThan(0);
+    const active = feed(banked, 1, { accruing: true }).s;
+    const grace = feed(active, TUNING.score.graceTime / 2, {}).s;
+    expect([active.phase, grace.phase]).toEqual(['active', 'grace']);
+    for (const s of [active, grace]) {
+      const r = updateDriftScore(s, { ...base, bombed: true }, DT);
+      expect(r.events).toEqual([{ type: 'chainBurned', points: Math.round(s.chainPoints) }]);
+      expect(r.state).toMatchObject({ phase: 'idle', chainPoints: 0, multiplier: 1, totalPoints: banked.totalPoints });
+    }
+    expect(updateDriftScore(createDriftScore(), { ...base, bombed: true }, DT).events).toEqual([]);
   });
 
   it('prop penalty hits the banked total, floored at 0, chain survives', () => {
