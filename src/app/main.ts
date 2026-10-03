@@ -9,6 +9,7 @@ import { loadSave } from '../core/save';
 import { detectQuality } from '../core/quality';
 import { createInput } from '../core/input';
 import { createAudio } from '../audio/sfx';
+import { prewarmAudioOutput } from '../audio/prewarm';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { applyRendererQuality, createRenderer } from '../render/environment';
@@ -106,6 +107,8 @@ async function boot(): Promise<void> {
   }
 
   const audio = createAudio();
+  // Starts the audio service during loading, so creating the context in the «В ЗАЕЗД» click stays cheap.
+  prewarmAudioOutput();
   const input = createInput(window);
   canvas.addEventListener('webglcontextlost', () => {
     halted = true;
