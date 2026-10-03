@@ -5,6 +5,7 @@ import { clamp } from '../shared/math';
 import { carCapsule, withDerived } from './car';
 import { EPS, closestParamOnSegment, type Segment } from './collisionGeometry';
 import { wallSlide, type SlideHit } from './collisionSlide';
+import { enterRecover } from './recover';
 
 type Capsule = { ax: number; az: number; bx: number; bz: number; r: number };
 type WallCollider = Extract<Collider, { kind: 'wall' }>;
@@ -125,21 +126,8 @@ function respond(s: CarState, o: Overlap, colliderId: string, t: Tuning): { stat
 
   // Lever arm sign: torque of the push n applied at the contact point (+ = yaw left).
   const lever = (o.nx * (o.z - z) - o.nz * (o.x - x)) / (t.car.capsuleHalf + t.car.radius);
-  const state: CarState = {
-    ...s,
-    x,
-    z,
-    vx,
-    vz,
-    yawRate: s.yawRate + t.collision.yawImpulse * impactSpeed * clamp(lever, -1, 1),
-    mode: 'recover',
-    modeTimer: t.drift.recoverTime,
-    driftDir: 0,
-    // Leaving a drift through a hit resets the same fields as a normal drift exit (car.ts
-    // exitDrift): the drift clock restarts and lateral grip blends back in (no jolt).
-    ...(s.mode === 'drift' ? { driftTime: 0, gripBlend: 0 } : {}),
-  };
-  return { state, contact };
+  const yawRate = s.yawRate + t.collision.yawImpulse * impactSpeed * clamp(lever, -1, 1);
+  return { state: enterRecover({ ...s, x, z, vx, vz, yawRate }, t), contact };
 }
 
 /** Keep one contact per collider id: the one with the highest impact speed; track the max depth. */
