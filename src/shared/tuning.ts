@@ -55,12 +55,18 @@ export const TUNING = {
     slipMax: 55 * DEG,
     /**
      * Path curvature (1/m) when steering into the drift / neutral / counter-steering. Full counter-steer
-     * (0) runs a straight line while the car keeps sliding.
+     * (negative: a slight OUTWARD curve) widens a line that is too tight while the car keeps sliding.
      */
     curvInto: 1 / 20,
     curvNeutral: 1 / 38,
-    curvCounter: 0,
+    curvCounter: -1 / 150,
+    /** Path curvature multiplier while Space is held in a drift (tighter arc). */
     handbrakeCurvBoost: 1.25,
+    /**
+     * Smooth entry: seconds over which a kick bends the path from the curvature the car had in grip to the
+     * drift target (smoothstep). The kick swings the body into the slide at once without yanking the path.
+     */
+    entryBlendTime: 0.4,
     handbrakeDecel: 3,
     /** Body yaw tracking toward (velocity heading + target slip). */
     bodyResponse: 8,
@@ -95,9 +101,9 @@ export const TUNING = {
     /**
      * Catch: full counter-steer (steer * driftDir <= -catchSteer) held for catchTime seconds with Space
      * released ends the drift. Counted while both the input and the wheel (smoothed steer, which sets the
-     * path curvature) are at full counter-steer, so a keyboard counter-steer first slides straight for
-     * catchTime (~0.5 s from the key press out of a neutral drift). Partial counter-steer keeps drifting;
-     * Space held keeps the slide.
+     * path curvature) are at full counter-steer, so a keyboard counter-steer first slides on a slightly
+     * outward path for catchTime (~0.5 s from the key press out of a neutral drift). Partial counter-steer
+     * keeps drifting; Space held keeps the slide.
      */
     catchSteer: 0.85,
     catchTime: 0.3,

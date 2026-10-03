@@ -82,6 +82,16 @@ export interface CarState {
    * direction of travel is kept. Set to tuning.drift.exitAlignTime by every drift exit, counting down.
    */
   exitAlign?: number;
+  /**
+   * Signed path curvature of the last step, 1/m (+ = turning left): the velocity-heading change per metre
+   * travelled, from the step's integration alone (collision responses not included). A kick starts from it.
+   */
+  pathCurv?: number;
+  /**
+   * Signed path curvature (1/m, + = left) the car had when the current drift was kicked; 0 outside drift mode.
+   * The drift path curvature blends from it to the drift target over tuning.drift.entryBlendTime.
+   */
+  entryCurv?: number;
 
   // ---- Derived values, recomputed at the end of every step ----
   /** |v|, m/s */

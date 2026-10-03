@@ -128,6 +128,40 @@ describe('car tuning: drift.*', () => {
     expect(run(fast, 1, script, hardBrakes, 'runoff')).toEqual(run(fast, 1, script, TUNING, 'runoff'));
   });
 
+  it('entryBlendTime sets how long a kick takes to bend the path to the drift target', () => {
+    /** Path curvature (1/m) of each step of a kick from a straight line, wheel and Space held into the turn. */
+    const kickCurvatures = (t: Tuning): number[] => {
+      let s: CarState = { ...moving(0, 22), steer: 1 };
+      const out: number[] = [];
+      for (let i = 0; i < Math.round(1 / DT); i++) {
+        const next = stepCar(s, inp({ throttle: 1, steer: 1, handbrake: true, handbrakePressed: i === 0 }), 'road', DT, t);
+        out.push((Math.atan2(next.vx, next.vz) - Math.atan2(s.vx, s.vz)) / (s.speed * DT));
+        s = next;
+      }
+      return out;
+    };
+    const target = TUNING.drift.curvInto * TUNING.drift.handbrakeCurvBoost;
+    const at = (t: Tuning, seconds: number): number => kickCurvatures(t)[Math.round(seconds / DT) - 1] / target;
+    const T = TUNING.drift.entryBlendTime;
+    expect(at(withDrift({ entryBlendTime: 0 }), DT)).toBeCloseTo(1, 9);
+    expect(at(TUNING, DT)).toBeLessThan(0.01);
+    expect(at(TUNING, T)).toBeCloseTo(1, 9);
+    expect(at(withDrift({ entryBlendTime: 2 * T }), T)).toBeCloseTo(0.5, 2);
+  });
+
+  it('curvCounter sets the path curvature at full counter-steer', () => {
+    /** Velocity-heading change over 0.5 s of full counter-steer (the catch disabled), after the wheel is across. */
+    const turn = (t: Tuning): number => {
+      const across = last(run(leftDrift(), 0.4, () => inp({ throttle: 1, steer: -1 }), t));
+      const after = last(run(across, 0.5, () => inp({ throttle: 1, steer: -1 }), t));
+      return Math.atan2(after.vx, after.vz) - Math.atan2(across.vx, across.vz);
+    };
+    const noCatch = { catchTime: Infinity };
+    expect(Math.abs(turn(withDrift({ ...noCatch, curvCounter: 0 })))).toBeLessThan(1e-9);
+    expect(turn(withDrift(noCatch))).toBeLessThan(-1 * DEG);
+    expect(turn(withDrift({ ...noCatch, curvCounter: 2 * TUNING.drift.curvCounter }))).toBeCloseTo(2 * turn(withDrift(noCatch)), 2);
+  });
+
   it('catchSteer sets how much counter-steer catches the slide', () => {
     const counter = () => inp({ throttle: 1, steer: -0.7 });
     expect(run(leftDrift(), 1, counter).every((s) => s.mode === 'drift')).toBe(true);

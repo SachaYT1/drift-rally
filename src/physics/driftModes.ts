@@ -9,7 +9,7 @@ import { integrateLongitudinal, type Motion, type StepContext } from './carConte
 
 /** Mode-machine result: the mode fields plus the physics memory, always present. */
 export type ModeStep = Pick<CarState, 'mode' | 'driftDir' | 'driftTime' | 'gripBlend' | 'modeTimer'> &
-  Required<Pick<CarState, 'flickArm' | 'catchTimer' | 'exitAlign'>>;
+  Required<Pick<CarState, 'flickArm' | 'catchTimer' | 'exitAlign' | 'entryCurv'>>;
 
 /** 3. Mode state machine. */
 export function nextMode(s: CarState, c: StepContext): ModeStep {
@@ -26,6 +26,7 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
     catchTimer: 0,
     // The exit phase runs in grip mode only; a heavy hit (recover) ends it.
     exitAlign: s.mode === 'grip' ? Math.max(0, (s.exitAlign ?? 0) - c.dt) : 0,
+    entryCurv: s.mode === 'drift' ? (s.entryCurv ?? 0) : 0,
   };
   const braking = c.brake > 0;
 
@@ -47,7 +48,9 @@ export function nextMode(s: CarState, c: StepContext): ModeStep {
       Math.abs(c.steerInput) >= d.kickSteerThreshold;
     if (!kick) return cur;
     const driftDir = c.steerInput > 0 ? 1 : -1;
-    return { ...cur, mode: 'drift', driftDir, driftTime: 0, modeTimer: 0, flickArm: 0, exitAlign: 0 };
+    // Smooth entry: the drift path starts from the path the car is on (the last step's curvature).
+    const entryCurv = s.pathCurv ?? 0;
+    return { ...cur, mode: 'drift', driftDir, driftTime: 0, modeTimer: 0, flickArm: 0, exitAlign: 0, entryCurv };
   }
 
   // Drift.
@@ -96,20 +99,29 @@ function exitDrift(cur: ModeStep, c: StepContext): ModeStep {
     modeTimer: 0,
     catchTimer: 0,
     exitAlign: c.t.drift.exitAlignTime,
+    entryCurv: 0,
   };
 }
 
-/** 5. Drift integration: the path curves, the body tracks velocity heading + target slip. */
-export function integrateDrift(c: StepContext, driftDir: -1 | 0 | 1): Motion {
+/**
+ * 5. Drift integration: the path curves, the body tracks velocity heading + target slip. The drift target
+ * curvature (relative to driftDir) runs into > neutral > 0 > full counter (a slight outward curve). Smooth
+ * entry: for entryBlendTime after the kick the path curvature blends (smoothstep) from the one the car had
+ * in grip to that target, so the kick swings the body into the slide without yanking the path inward.
+ */
+export function integrateDrift(c: StepContext, m: Pick<ModeStep, 'driftDir' | 'driftTime' | 'entryCurv'>): Motion {
   const d = c.t.drift;
+  const driftDir = m.driftDir;
   const u = c.steer * driftDir;
   const baseCurv = u >= 0 ? lerp(d.curvNeutral, d.curvInto, u) : lerp(d.curvNeutral, d.curvCounter, -u);
-  const curvature = baseCurv * (c.handbrake ? d.handbrakeCurvBoost : 1);
+  const target = driftDir * baseCurv * (c.handbrake ? d.handbrakeCurvBoost : 1);
+  const blend = d.entryBlendTime > 0 ? smoothstep((m.driftTime + c.dt) / d.entryBlendTime) : 1;
+  const curvature = blend < 1 ? lerp(m.entryCurv, target, blend) : target;
   const baseSlip = u >= 0 ? lerp(d.slipMid, d.slipWide, u) : lerp(d.slipMid, d.slipNarrow, -u);
   const targetSlip = Math.min(baseSlip + (c.handbrake ? d.handbrakeExtraSlip : 0), d.slipMax);
 
   // Path: rotate the velocity direction by pathRate * dt, keeping |v|.
-  const pathRate = driftDir * c.speed * curvature;
+  const pathRate = c.speed * curvature;
   const phiNew = c.phi + pathRate * c.dt;
 
   const accel =
@@ -125,6 +137,12 @@ export function integrateDrift(c: StepContext, driftDir: -1 | 0 | 1): Motion {
   const bodyRate = clamp(wrapAngle(hTarget - c.h) * d.bodyResponse, -d.bodyMaxYawRate, d.bodyMaxYawRate);
 
   return { vx: speed * Math.sin(phiNew), vz: speed * Math.cos(phiNew), yawRate: pathRate + bodyRate };
+}
+
+/** 0 at x <= 0, 1 at x >= 1, eased in between (zero slope at both ends). */
+function smoothstep(x: number): number {
+  const k = clamp(x, 0, 1);
+  return k * k * (3 - 2 * k);
 }
 
 /**

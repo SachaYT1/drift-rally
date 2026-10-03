@@ -1,7 +1,7 @@
 /**
  * Drift controls from the final review: flick timing (Space slightly before the opposite steer, or held
- * while the steer crosses over), braking out of a drift with S, full counter-steer running straight, and
- * catching the slide by holding full counter-steer (design spec §2.3).
+ * while the steer crosses over), braking out of a drift with S, full counter-steer widening the line (a slight
+ * outward path curvature), and catching the slide by holding full counter-steer (design spec §2.3).
  */
 import { describe, expect, it } from 'vitest';
 import { createCarState, isDrifting, stepCar, withDerived } from './car';
@@ -165,10 +165,12 @@ describe('car physics: drift path control', () => {
     return { turn: wrapAngle(Math.atan2(b.vx, b.vz) - Math.atan2(a.vx, a.vz)) * side, t: t.slice(steps(settle)) };
   }
 
-  it('full counter-steer runs a straight line while the car keeps sliding (until it catches)', () => {
+  it('full counter-steer widens the line: the path bends slightly outward while the car keeps sliding (until it catches)', () => {
+    // A line that is too tight can be opened up again (player test-drive: at zero curvature it never could).
     for (const side of [1, -1] as const) {
       const { turn, t } = pathTurn(side, -1, 0.6, 1);
-      expect(Math.abs(turn)).toBeLessThan(0.035);
+      expect(turn).toBeLessThan(-2 * (Math.PI / 180));
+      expect(turn).toBeGreaterThan(-15 * (Math.PI / 180));
       for (const s of t) {
         expect(s.mode).toBe('drift');
         expect(s.driftDir).toBe(side);
@@ -178,13 +180,22 @@ describe('car physics: drift path control', () => {
     }
   });
 
-  it('path curvature orders into > neutral > full counter >= 0', () => {
+  it('path curvature orders into > neutral > 0 > full counter', () => {
     const into = pathTurn(1, 1, 0.6, 1).turn;
     const neutral = pathTurn(1, 0, 0.6, 1).turn;
     const counter = pathTurn(1, -1, 0.6, 1).turn;
     expect(into).toBeGreaterThan(neutral);
-    expect(neutral).toBeGreaterThan(counter);
-    expect(counter).toBeGreaterThanOrEqual(-1e-9);
+    expect(neutral).toBeGreaterThan(0);
+    expect(counter).toBeLessThan(0);
+  });
+
+  it('Space held tightens the arc (handbrakeCurvBoost)', () => {
+    for (const u of [0, 1]) {
+      const free = trace(drift(1), steps(1), () => inp({ throttle: 1, steer: u }));
+      const space = trace(drift(1), steps(1), () => inp({ throttle: 1, steer: u, handbrake: true }));
+      const turn = (t: CarState[]) => wrapAngle(Math.atan2(last(t).vx, last(t).vz) - Math.atan2(t[0].vx, t[0].vz));
+      expect(turn(space), `u ${u}`).toBeGreaterThan(turn(free) * 1.1);
+    }
   });
 });
 
@@ -210,9 +221,9 @@ describe('car physics: catching the slide', () => {
     }
   });
 
-  it('a keyboard counter-steer straightens the path before it catches, from into-steer too (spec §2.3)', () => {
+  it('a keyboard counter-steer widens the path before it catches, from into-steer too (spec §2.3)', () => {
     // Digital keys: the wheel needs time to swing across, and the path curvature follows the wheel. The
-    // catch waits for the wheel, so the car first slides straight ("full counter-steer ~ zero curvature").
+    // catch waits for the wheel, so the car first slides with the path bending slightly outward.
     for (const side of [1, -1] as const) {
       for (const pre of [0, 1]) {
         const kick = stepCar(cruising(22), inp({ throttle: 1, steer: side, handbrake: true, handbrakePressed: true }), 'road', DT);
@@ -222,11 +233,13 @@ describe('car physics: catching the slide', () => {
         const full = wheelFullCounter(t, side);
         expect(full, `pre ${pre}`).toBeGreaterThan(0);
         expect(exit, `pre ${pre}`).toBeGreaterThan(full);
-        // The last catchTime before the catch: a straight slide (< 3 deg of path turn), still sliding.
+        // The last catchTime before the catch: the path turns outward (never into the drift), a few degrees at
+        // most, still sliding.
         const a = t[exit - steps(D.catchTime) + 1];
         const b = t[exit - 1];
-        const turn = Math.abs(wrapAngle(Math.atan2(b.vx, b.vz) - Math.atan2(a.vx, a.vz)));
-        expect(turn, `pre ${pre}`).toBeLessThan(3 * (Math.PI / 180));
+        const turn = wrapAngle(Math.atan2(b.vx, b.vz) - Math.atan2(a.vx, a.vz)) * side;
+        expect(turn, `pre ${pre}`).toBeLessThan(0);
+        expect(turn, `pre ${pre}`).toBeGreaterThan(-5 * (Math.PI / 180));
         expect(Math.abs(b.slip), `pre ${pre}`).toBeGreaterThan(TUNING.score.minSlip);
       }
     }

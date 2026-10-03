@@ -41,7 +41,7 @@ describe('car physics', () => {
     const c = createCarState(1, 2, 0.5);
     expect(c.mode).toBe('grip');
     expect(c.speed).toBe(0);
-    expect(c).toMatchObject({ flickArm: 0, catchTimer: 0, exitAlign: 0 });
+    expect(c).toMatchObject({ flickArm: 0, catchTimer: 0, exitAlign: 0, pathCurv: 0, entryCurv: 0 });
     for (const v of Object.values(c)) if (typeof v === 'number') expect(Number.isFinite(v)).toBe(true);
   });
 
