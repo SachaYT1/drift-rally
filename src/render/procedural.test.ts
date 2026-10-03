@@ -10,6 +10,7 @@ import {
   startArchSize,
   type Size3,
 } from './procedural';
+import { OCCLUDER_BOXES } from './proceduralKit';
 import { PLAZA } from '../track/plaza';
 import { VISUAL_HEIGHT, type FootprintShape } from '../track/trackDef';
 
@@ -239,6 +240,47 @@ describe('procedural world objects', () => {
       // Below the banner nothing stands inside the span (road, runoff, barrier and camera stay clear).
       for (const v of vertices(arch).filter((p) => p.y < 10.5)) expect(Math.abs(v.x)).toBeGreaterThanOrEqual(width / 2 - 0.02);
       expect(meshesTagged(arch, 'occluder').length).toBeGreaterThan(0);
+    });
+
+    /** Per-piece boxes of the arch meshes whose colour is `hex` (pieces are merged per material). */
+    function archPieces(arch: THREE.Object3D, hex: number): THREE.Box3[] {
+      const out: THREE.Box3[] = [];
+      for (const m of meshesTagged(arch, 'part', 'arch')) {
+        if ((m.material as THREE.MeshLambertMaterial).color.getHex() !== hex) continue;
+        const b: number[] = m.userData[OCCLUDER_BOXES];
+        for (let i = 0; i < b.length; i += 6) {
+          out.push(new THREE.Box3(new THREE.Vector3(b[i], b[i + 1], b[i + 2]), new THREE.Vector3(b[i + 3], b[i + 4], b[i + 5])));
+        }
+      }
+      return out;
+    }
+
+    it.each([24, 28, 32])('wraps each post band proud of every post face so nothing z-fights (width %f)', (width) => {
+      const arch = createStartArch(width);
+      const posts = archPieces(arch, 0xf7f5f1);
+      // Coral pieces low on the post are the bands (the other coral pieces are the caps on top).
+      const bands = archPieces(arch, 0xf0573a).filter((b) => b.max.y < 6);
+      expect(posts).toHaveLength(2);
+      expect(bands).toHaveLength(2);
+      // A gap this size stays resolvable by a 24-bit depth buffer (near 1 m) far beyond fog start.
+      const proud = 0.03;
+      for (const band of bands) {
+        const post = posts.find((p) => p.min.x < band.max.x && p.max.x > band.min.x);
+        if (!post) throw new Error('band without a post');
+        expect(band.min.y).toBeGreaterThan(post.min.y);
+        expect(band.max.y).toBeLessThan(post.max.y);
+        expect(band.min.x).toBeLessThanOrEqual(post.min.x - proud);
+        expect(band.max.x).toBeGreaterThanOrEqual(post.max.x + proud);
+        expect(band.min.z).toBeLessThanOrEqual(post.min.z - proud);
+        expect(band.max.z).toBeGreaterThanOrEqual(post.max.z + proud);
+      }
+      // The banner still meets both posts (no sky showing between banner end and post).
+      const banner = unionBox(meshesTagged(arch, 'part', 'banner'));
+      for (const post of posts) {
+        const inner = post.min.x > 0 ? post.min.x : post.max.x;
+        expect(banner.max.x).toBeGreaterThanOrEqual(Math.abs(inner) - 1e-6);
+        expect(banner.min.x).toBeLessThanOrEqual(-Math.abs(inner) + 1e-6);
+      }
     });
   });
 
