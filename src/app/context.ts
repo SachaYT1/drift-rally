@@ -92,6 +92,10 @@ export interface AppDeps {
   audio: GameAudio;
   input: InputController;
   test: TestFlags;
+  /**
+   * The save read at boot: its settings become this tab's live settings; its progress is replaced by the save
+   * as stored when createApp() runs (another tab may have finished a race while this one was loading).
+   */
   save: SaveData;
   quality: QualityLevel;
   /** Quality is a test override: apply it, never persist it. */
@@ -174,6 +178,11 @@ export function createApp(d: AppDeps): App {
     save = { ...save, ...patch };
     app.updateSave((current) => ({ ...current, ...patch }));
   }
+
+  // d.save is the boot-time snapshot, read before seconds of loading during which nothing listened for
+  // 'storage': adopt the progress stored NOW, then listen from this same task on, so no write is missed.
+  const atStart = readSave(d.storage);
+  if (atStart) adopt(atStart);
 
   // Another tab saved (a finished race, a setting) or cleared the storage: follow its progress.
   (d.storageEvents ?? window).addEventListener('storage', (e) => {

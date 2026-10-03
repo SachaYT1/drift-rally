@@ -144,7 +144,7 @@ describe('save shared between tabs', () => {
   }
 
   /** createApp with inert render / audio stand-ins: only the save plumbing is real. */
-  function openTab(storage: Storage | null, events: EventTarget, qualityOverride = false): App {
+  function openTab(storage: Storage | null, events: EventTarget, qualityOverride = false, save = loadSave(storage)): App {
     const scene = { traverse: () => undefined };
     const deps = {
       renderer: { compileAsync: () => Promise.resolve(), getPixelRatio: () => 1, setPixelRatio() {}, setSize() {} },
@@ -156,7 +156,7 @@ describe('save shared between tabs', () => {
       audio: { setMuted() {} },
       input: {},
       test: { enabled: false, small: false },
-      save: loadSave(storage),
+      save,
       quality: 'medium',
       qualityOverride,
       storage,
@@ -235,6 +235,26 @@ describe('save shared between tabs', () => {
     recordRaceResult(b, race({ coinsEarned: 1 }));
     expect(a.save.coins).toBe(41);
     expect(seen.length).toBe(1);
+  });
+
+  it('a save another tab wrote while this one was loading is not missed', () => {
+    const browser = browserStorage();
+    const t1 = browser.tab();
+    const t2 = browser.tab();
+    // main.ts reads the save at boot, then loads for seconds before createApp() can listen for 'storage'.
+    const bootSnapshot = loadSave(t1.storage);
+    const b = openTab(t2.storage, t2.events);
+    recordRaceResult(b, race({ coinsEarned: 40, totalPoints: 9000, bestLap: 64 }));
+    b.setMuted(true);
+    const a = openTab(t1.storage, t1.events, false, bootSnapshot);
+    expect(a.save).toMatchObject({ coins: 40, bestScore: 9000, bestLapMs: 64_000 });
+    // This tab keeps the settings it booted with (its renderer and audio already use them).
+    expect(a.save.muted).toBe(false);
+    // Its own next write builds on the stored progress, and later writes still arrive.
+    recordRaceResult(a, race({ coinsEarned: 5 }));
+    expect(browser.stored().coins).toBe(45);
+    recordRaceResult(b, race({ coinsEarned: 1 }));
+    expect(a.save.coins).toBe(46);
   });
 
   it('follows a save cleared in another tab and ignores unrelated keys', () => {
