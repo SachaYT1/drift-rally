@@ -272,7 +272,7 @@ describe('garage records with the friends table (jsdom)', () => {
   });
 
   const mount = (port: ReturnType<typeof fakePort>, onMute = vi.fn()) => {
-    ui = createGarageUI(root, { save: SAVE, trackName: 'Площадь', onStart: () => {}, onMute, leaderboard: port });
+    ui = createGarageUI(root, { save: SAVE, trackName: 'Площадь', onStart: () => {}, onMute, onGhosts: () => {}, leaderboard: port });
     click(root.querySelector('[data-open="records"]')!);
     return root.querySelector<HTMLElement>('.dr-friends')!;
   };

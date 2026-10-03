@@ -17,10 +17,12 @@ describe('garage UI (jsdom)', () => {
   let root: HTMLElement;
   let ui: GarageUI;
   let onMute: ReturnType<typeof vi.fn<(m: boolean) => void>>;
+  let onGhosts: ReturnType<typeof vi.fn<(on: boolean) => void>>;
 
   function mount(save: SaveData = SAVE): void {
     onMute = vi.fn<(m: boolean) => void>();
-    ui = createGarageUI(root, { save, trackName: 'Площадь', onStart: () => {}, onMute });
+    onGhosts = vi.fn<(on: boolean) => void>();
+    ui = createGarageUI(root, { save, trackName: 'Площадь', onStart: () => {}, onMute, onGhosts });
   }
 
   beforeEach(() => {
@@ -159,15 +161,44 @@ describe('garage UI (jsdom)', () => {
       expect(onMute).toHaveBeenLastCalledWith(false);
     });
   });
+
+  describe('ghost bots switch', () => {
+    it('reflects save.ghosts', () => {
+      mount({ ...SAVE, ghosts: false });
+      const btn = q('.dr-ghosts');
+      expect(btn.getAttribute('role')).toBe('switch');
+      expect(btn.getAttribute('aria-checked')).toBe('false');
+      expect(norm(btn.textContent)).toContain('Призраки');
+      ui.update({ ...SAVE, ghosts: true });
+      expect(btn.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('toggles on a pointer click and gives the focus back to the page', () => {
+      mount();
+      const btn = q<HTMLButtonElement>('.dr-ghosts');
+      btn.focus();
+      click(btn);
+      expect(onGhosts).toHaveBeenLastCalledWith(false);
+      expect(btn.getAttribute('aria-checked')).toBe('false');
+      expect(document.activeElement).not.toBe(btn); // Enter must still start the race
+      click(btn);
+      expect(onGhosts).toHaveBeenLastCalledWith(true);
+      expect(btn.getAttribute('aria-checked')).toBe('true');
+      expect(onMute).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('enterGarage mute wiring (jsdom)', () => {
-  it('routes the garage sound toggle to app.setMuted', () => {
+  it('routes the garage sound toggle to app.setMuted and the ghost switch to app.setGhosts', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
     let save: SaveData = { ...SAVE };
     const setMuted = vi.fn((m: boolean) => {
       save = { ...save, muted: m };
+    });
+    const setGhosts = vi.fn((on: boolean) => {
+      save = { ...save, ghosts: on };
     });
     const app = {
       ui: root,
@@ -180,6 +211,7 @@ describe('enterGarage mute wiring (jsdom)', () => {
         return save;
       },
       setMuted,
+      setGhosts,
       onSaveChanged: () => () => {},
       screen: 'loading',
       redraw: null,
@@ -190,6 +222,8 @@ describe('enterGarage mute wiring (jsdom)', () => {
     expect(setMuted).toHaveBeenLastCalledWith(true);
     click(root.querySelector('.dr-sound')!);
     expect(setMuted).toHaveBeenLastCalledWith(false);
+    click(root.querySelector('.dr-ghosts')!);
+    expect(setGhosts).toHaveBeenLastCalledWith(false);
     screen.destroy();
     root.remove();
   });

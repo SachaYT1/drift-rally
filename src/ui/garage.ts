@@ -8,10 +8,14 @@ import { COIN_HTML, LOGO_HTML, createLayer, escapeHtml, isInteractiveTarget, isT
 import { APP_VERSION } from '../shared/version';
 
 export interface GarageUI {
-  /** New save: coins pop in the wallet, records and the sound toggle follow it. */
+  /** New save: coins pop in the wallet, records, the sound toggle and the ghost switch follow it. */
   update(save: SaveData): void;
   destroy(): void;
 }
+
+/** Ghost (bots switch); dimmed while off (styles.css keys off aria-checked). */
+const GHOST_SVG =
+  '<svg viewBox="0 0 24 24" width="1.25em" height="1.25em" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 20.5V11a7 7 0 0 1 14 0v9.5l-2.33-1.75-2.34 1.75L12 18.75l-2.33 1.75-2.34-1.75z"/><circle cx="9.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>';
 
 /** Display-only car card values (design spec §6), not physics parameters. */
 const CAR_STATS: readonly { label: string; value: number; color: string }[] = [
@@ -114,6 +118,8 @@ export function createGarageUI(
     onStart(): void;
     /** The sound toggle or M flipped mute (the UI already shows the new state). */
     onMute(muted: boolean): void;
+    /** The «Призраки» switch flipped the ghost bots (the UI already shows the new state). */
+    onGhosts(on: boolean): void;
     /** Friends table in «Рекорды»; null / omitted: personal records only. */
     leaderboard?: LeaderboardPort | null;
   },
@@ -130,6 +136,7 @@ export function createGarageUI(
         <button type="button" class="dr-nav__item" data-open="records">Рекорды</button>
       </nav>
       <div class="dr-topbar__end">
+        <button type="button" class="dr-ghosts" role="switch" aria-checked="true" title="Боты-призраки в заезде">${GHOST_SVG}<span>Призраки</span></button>
         <button type="button" class="dr-sound" role="switch" aria-checked="true" aria-label="Звук" title="Звук (M)">${SOUND_SVG}${keyHtml('M')}</button>
         <div class="dr-wallet" title="Монеты">${COIN_HTML}<span class="dr-wallet__n dr-num"></span></div>
       </div>
@@ -156,12 +163,14 @@ export function createGarageUI(
   const bestScore = qs(layer, '.dr-track__score');
   const cta = qs<HTMLButtonElement>(layer, '.dr-cta');
   const soundBtn = qs<HTMLButtonElement>(layer, '.dr-sound');
+  const ghostsBtn = qs<HTMLButtonElement>(layer, '.dr-ghosts');
   const navButtons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.dr-nav__item'));
   /** Everything behind a modal: inert while one is open, so neither Tab nor a screen reader reaches it. */
   const background = Array.from(layer.children).filter((c): c is HTMLElement => c instanceof HTMLElement);
 
   let save = opts.save;
   let muted = save.muted;
+  let ghosts = save.ghosts;
   let started = false;
   /** `refocus`: the modal was opened from the keyboard, so focus goes back to its opener on close. */
   let modal: { kind: ModalKind; el: HTMLElement; body: HTMLElement; opener: HTMLElement; refocus: boolean } | null = null;
@@ -170,6 +179,10 @@ export function createGarageUI(
 
   function renderSound(): void {
     soundBtn.setAttribute('aria-checked', String(!muted));
+  }
+
+  function renderGhosts(): void {
+    ghostsBtn.setAttribute('aria-checked', String(ghosts));
   }
 
   function toggleMute(): void {
@@ -181,6 +194,8 @@ export function createGarageUI(
   function render(prevCoins: number | null): void {
     muted = save.muted;
     renderSound();
+    ghosts = save.ghosts;
+    renderGhosts();
     walletN.textContent = formatPoints(save.coins);
     bestScore.textContent = save.bestScore > 0 ? formatPoints(save.bestScore) : '—';
     if (prevCoins !== null && save.coins !== prevCoins) play(wallet, POP, { duration: 420, easing: 'ease-out' });
@@ -268,6 +283,14 @@ export function createGarageUI(
     toggleMute();
   };
   soundBtn.addEventListener('click', onSound);
+  const onGhostsClick = (e: MouseEvent): void => {
+    // Like the sound toggle: a focused switch would take the next Enter instead of the start.
+    if (e.detail !== 0) ghostsBtn.blur();
+    ghosts = !ghosts;
+    renderGhosts();
+    opts.onGhosts(ghosts);
+  };
+  ghostsBtn.addEventListener('click', onGhostsClick);
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.code === 'Tab' && modal) {
