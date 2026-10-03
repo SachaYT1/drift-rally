@@ -103,7 +103,8 @@ export function createGarageUI(
   opts: {
     save: SaveData;
     trackName: string;
-    onStart(): void;
+    /** «В заезд» / Enter on an owned car: race `car` (the one on the card). */
+    onStart(car: CarId): void;
     /** The sound toggle or M flipped mute (the UI already shows the new state). */
     onMute(muted: boolean): void;
     /** The «Призраки» switch flipped the ghost bots (the UI already shows the new state). */
@@ -326,7 +327,7 @@ export function createGarageUI(
     blurInside(); // also on repeats: a second click re-focuses the CTA on mousedown
     if (started) return;
     started = true;
-    opts.onStart();
+    opts.onStart(browsed);
   }
 
   const onNav = (e: MouseEvent): void => {

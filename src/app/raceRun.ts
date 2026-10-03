@@ -44,7 +44,7 @@ export interface RaceRun {
   readonly session: Session;
   /** The ghost bots of this run; null: switched off in the garage. */
   readonly ghosts: GhostRun | null;
-  /** The car of this run (the save's selected car when the run began). */
+  /** The car of this run. */
   readonly car: CarId;
   /** The physics of this run: TUNING with the car's overrides. */
   readonly tuning: Tuning;
@@ -69,9 +69,9 @@ const RESULTS_DELAY_MS = 1400;
 const HUD_INTERVAL = 1 / 30;
 const STEP_DT = 1 / TUNING.race.physicsHz;
 
-export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: InputSource | null): RaceRun {
+/** One race in `car` (the garage hands over the car on its podium, not whatever the save selects by then). */
+export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: InputSource | null, car: CarId): RaceRun {
   const { race, audio, input, ui } = app;
-  const car = app.save.selectedCar;
   const tuning = tuningFor(car);
   const session = createSession(app.track, { bestLap: bestLapSeconds(app.save), tuning });
   // The garage switch is read once per run: toggling it applies from the next race.

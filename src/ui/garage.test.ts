@@ -191,12 +191,12 @@ describe('garage UI (jsdom)', () => {
   });
 
   describe('car line-up', () => {
-    let onStart: ReturnType<typeof vi.fn<() => void>>;
+    let onStart: ReturnType<typeof vi.fn<(car: CarId) => void>>;
     let onBrowse: ReturnType<typeof vi.fn<(id: CarId) => void>>;
     let onBuy: ReturnType<typeof vi.fn<(id: CarId) => boolean>>;
 
     function mountCars(save: SaveData = SAVE, initialCar?: CarId): void {
-      onStart = vi.fn<() => void>();
+      onStart = vi.fn<(car: CarId) => void>();
       onBrowse = vi.fn<(id: CarId) => void>();
       onBuy = vi.fn<(id: CarId) => boolean>((id) => {
         // What garageScreen does: the purchase comes back as a new save.
@@ -239,6 +239,14 @@ describe('garage UI (jsdom)', () => {
       keydown('ArrowLeft');
       keydown('Enter');
       expect(onStart).toHaveBeenCalledTimes(1);
+      expect(onStart).toHaveBeenCalledWith('iskra');
+    });
+
+    it('starts the race in the car on the card', () => {
+      mountCars({ ...SAVE, ownedCars: ['iskra', 'quadro'] });
+      keydown('ArrowRight');
+      click(cta());
+      expect(onStart).toHaveBeenCalledWith('quadro');
     });
 
     it('disables «Купить» and tells how many coins are missing', () => {
@@ -356,6 +364,36 @@ describe('enterGarage line-up wiring (jsdom)', () => {
     expect(shown).toEqual(['iskra', 'quadro', 'ronin']);
     expect(selected).toEqual(['ronin']);
     screen.destroy();
+    root.remove();
+  });
+
+  it('races the car on the podium even when another tab selected another one meanwhile', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let save: SaveData = { ...SAVE, ownedCars: ['iskra', 'quadro', 'ronin'], selectedCar: 'quadro' };
+    const app = {
+      ui: root,
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: () => {} },
+      renderer: { render: () => {} },
+      track: { def: { name: 'Площадь' } },
+      input: { setRacing: () => {} },
+      audio: { setEngineActive: () => {}, unlock: () => Promise.resolve() },
+      get save() {
+        return save;
+      },
+      updateSave: (change: (s: SaveData) => SaveData) => (save = change(save)),
+      setMuted: () => {},
+      onSaveChanged: () => () => {},
+      screen: 'loading',
+      redraw: null,
+      frameDone: () => {},
+    } as unknown as App;
+    const onStart = vi.fn<(car: CarId) => void>();
+    enterGarage(app, { lastShown: null, onStart });
+    save = { ...save, selectedCar: 'ronin' }; // another tab browsed to «Ронин»
+    keydown('Enter');
+    expect(onStart).toHaveBeenCalledWith('quadro');
+    expect(save.selectedCar).toBe('quadro');
     root.remove();
   });
 });

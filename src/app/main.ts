@@ -21,7 +21,7 @@ import { enterGarage, type GarageScreen } from './garageScreen';
 import { enterRace, type RaceScreen } from './raceScreen';
 import { installTestHook } from './testHook';
 import { createLeaderboard } from './leaderboard';
-import { isCarId } from '../shared/cars';
+import { isCarId, type CarId } from '../shared/cars';
 
 declare global {
   interface Window {
@@ -74,12 +74,12 @@ async function boot(): Promise<void> {
     lastShownSave = app.save;
   }
 
-  function goRace(): void {
+  function goRace(car: CarId): void {
     if (!app || halted) return;
     const input = app.input;
     garageScreen = null;
     // Test mode: the hook steps the simulation; rAF only renders until __game.realtime() says otherwise.
-    raceScreen = enterRace(app, { source: test.enabled ? null : () => input.sample(), onGarage: goGarage });
+    raceScreen = enterRace(app, { car, source: test.enabled ? null : () => input.sample(), onGarage: goGarage });
   }
 
   if (test.enabled) {

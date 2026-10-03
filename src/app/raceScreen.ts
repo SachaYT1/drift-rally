@@ -1,8 +1,9 @@
 /**
  * Race screen: a sequence of race runs on the one cached race scene. «Заново» / «Ещё раз» destroy the
  * current run and start a fresh session (props, effects and HUD reset; nothing GPU-side is rebuilt);
- * «В гараж» hands control back to main.ts.
+ * «В гараж» hands control back to main.ts. Every run of the screen races the same car.
  */
+import type { CarId } from '../shared/cars';
 import type { App } from './context';
 import { startRaceRun, type InputSource, type RaceRun } from './raceRun';
 
@@ -17,7 +18,15 @@ export interface RaceScreen {
   destroy(): void;
 }
 
-export function enterRace(app: App, opts: { source: InputSource | null; onGarage(): void }): RaceScreen {
+export function enterRace(
+  app: App,
+  opts: {
+    /** The car of every run (retries too). */
+    car: CarId;
+    source: InputSource | null;
+    onGarage(): void;
+  },
+): RaceScreen {
   let source = opts.source;
   let run: RaceRun | null = null;
   let destroyed = false;
@@ -41,6 +50,7 @@ export function enterRace(app: App, opts: { source: InputSource | null; onGarage
         },
       },
       source,
+      opts.car,
     );
   }
 

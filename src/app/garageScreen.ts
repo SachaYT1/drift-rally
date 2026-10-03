@@ -10,7 +10,10 @@ import type { App } from './context';
 import { purchaseCar, selectCar } from './carShop';
 
 export interface GarageScreen {
-  /** Leave for the race. `gesture`: called from a user gesture (audio may be unlocked). */
+  /**
+   * Leave for a race in the car on the podium (the selected car when that one is not owned, e.g. the test
+   * preview). `gesture`: called from a user gesture (audio may be unlocked).
+   */
   start(gesture: boolean): void;
   destroy(): void;
 }
@@ -22,7 +25,8 @@ export function enterGarage(
   app: App,
   opts: {
     lastShown: SaveData | null;
-    onStart(): void;
+    /** Race `car` (owned; also saved as the selected car). */
+    onStart(car: CarId): void;
     /** Test preview (`?test&car=<id>`): open on this car without changing the save. */
     previewCar?: CarId | null;
   },
@@ -39,9 +43,12 @@ export function enterGarage(
 
   const initialCar = opts.previewCar ?? app.save.selectedCar;
   garage.setCar(initialCar);
+  /** The car on the podium (and on the card). */
+  let shown: CarId = initialCar;
 
   /** The podium follows the browsed car; an owned one becomes the car of the next race. */
   function browse(id: CarId): void {
+    shown = id;
     garage.setCar(id);
     if (app.save.ownedCars.includes(id) && app.save.selectedCar !== id) app.updateSave((s) => selectCar(s, id));
   }
@@ -51,7 +58,7 @@ export function enterGarage(
   const ui = createGarageUI(app.ui, {
     save: opts.lastShown ?? app.save,
     trackName: app.track.def.name,
-    onStart: () => start(true),
+    onStart: (car) => start(true, car),
     onMute: (m) => app.setMuted(m),
     onGhosts: (on) => app.setGhosts(on),
     leaderboard: app.leaderboard,
@@ -87,12 +94,15 @@ export function enterGarage(
     if (app.redraw === draw) app.redraw = null;
   }
 
-  function start(gesture: boolean): void {
+  function start(gesture: boolean, car: CarId = shown): void {
     if (destroyed) return;
     // resume() must run synchronously inside the click / keydown to count as a user gesture.
     if (gesture) void app.audio.unlock();
+    // The car on the podium races, even if another tab selected another one meanwhile.
+    const racing = app.save.ownedCars.includes(car) ? car : app.save.selectedCar;
+    if (app.save.selectedCar !== racing) app.updateSave((s) => selectCar(s, racing));
     destroy();
-    opts.onStart();
+    opts.onStart(racing);
   }
 
   app.redraw = draw;
