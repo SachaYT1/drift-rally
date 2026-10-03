@@ -46,12 +46,26 @@ describe('input', () => {
     expect(inp.sample().throttle).toBe(0);
     expect(onBlur).toHaveBeenCalledOnce();
   });
-  it('prevents default for game keys only while racing', () => {
+  it('prevents default for letter game keys only while racing', () => {
     const t = new EventTarget(); const inp = createInput(t);
-    expect(key(t, 'keydown', 'Space').defaultPrevented).toBe(false);
+    expect(key(t, 'keydown', 'KeyW').defaultPrevented).toBe(false);
     inp.setRacing(true);
+    expect(key(t, 'keydown', 'KeyW').defaultPrevented).toBe(true);
     expect(key(t, 'keydown', 'Space').defaultPrevented).toBe(true);
     expect(key(t, 'keydown', 'KeyQ').defaultPrevented).toBe(false);
+  });
+  it('never lets Space or an arrow keydown scroll the page, racing or not (an embedding page scrolls too)', () => {
+    const t = new EventTarget(); const inp = createInput(t);
+    const scrollKeys = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    for (const racing of [false, true, false]) {
+      inp.setRacing(racing);
+      for (const code of scrollKeys) {
+        expect(key(t, 'keydown', code).defaultPrevented).toBe(true);
+        expect(key(t, 'keydown', code, true).defaultPrevented).toBe(true);
+      }
+      // Activating a focused button happens on Space keyup: only blocked while racing.
+      expect(key(t, 'keyup', 'Space').defaultPrevented).toBe(racing);
+    }
   });
 });
 
@@ -82,6 +96,9 @@ describe('input edge cases', () => {
     inp.setRacing(true);
     for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
       expect(press(t, 'keydown', 'KeyR', { [mod]: true }).defaultPrevented).toBe(false);
+      // Alt+Left (history back), Ctrl+Space (input method switch) stay the browser's / OS's.
+      expect(press(t, 'keydown', 'ArrowLeft', { [mod]: true }).defaultPrevented).toBe(false);
+      expect(press(t, 'keydown', 'Space', { [mod]: true }).defaultPrevented).toBe(false);
     }
     expect(inp.consumeActions().respawn).toBe(false);
     expect(inp.sample().throttle).toBe(0);
@@ -92,7 +109,7 @@ describe('input edge cases', () => {
     expect(press(t, 'keydown', 'ArrowDown', { repeat: true }).defaultPrevented).toBe(true);
     expect(press(t, 'keyup', 'Space').defaultPrevented).toBe(true);
     inp.setRacing(false);
-    expect(press(t, 'keydown', 'ArrowDown').defaultPrevented).toBe(false);
+    expect(press(t, 'keydown', 'KeyS').defaultPrevented).toBe(false);
     expect(press(t, 'keyup', 'Space').defaultPrevented).toBe(false);
   });
   it('latches each action independently and returns fresh frames', () => {
