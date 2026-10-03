@@ -42,7 +42,7 @@
 |---|---|---|
 | `src/shared/cars.ts` | new | Line-up data (`CARS`, `CAR_IDS`, `CarId`), `isCarId`, `tuningFor` |
 | `src/shared/cars.test.ts` | new | Catalogue invariants, `tuningFor` |
-| `src/app/carsBalance.test.ts` | new | Autopilot race per car: clean driving, points ladder, Ронин fastest |
+| `src/game/carsBalance.test.ts` | new | Autopilot race per car: clean driving, points ladder, Ронин fastest |
 | `src/shared/types.ts` | modify | `SaveData.ownedCars / selectedCar / bestScoreCar` |
 | `src/core/save.ts` (+ test) | modify | Defaults, sanitising, persisting the car fields |
 | `src/app/context.ts` (+ test) | modify | `sameProgress` covers the car fields (other tabs' purchases reach the garage) |
@@ -65,7 +65,7 @@
 | `tests/e2e/cars.spec.ts` | new | Buy a car in the garage and race it |
 | `CHANGELOG.md`, `README.md` | modify | Player-facing notes |
 
-**Branch:** `feature/sport-cars` (worktree `.claude/worktrees/sport-cars`, from `develop`). Parallel branches to keep in mind at merge time: `feature/ghost-bots` moves `src/app/autopilot.ts` into the game layer (whichever merges second fixes the import in `src/app/carsBalance.test.ts` and `src/app/testHook.ts`); `feature/bombs` puts bombs on the drift lines of four corners, so after merging it re-run `src/app/carsBalance.test.ts` and re-measure the ladder if a car starts hitting bombs.
+**Branch:** `feature/sport-cars` (worktree `.claude/worktrees/sport-cars`, from `develop`). Parallel branches to keep in mind at merge time: `feature/ghost-bots` moves `src/app/autopilot.ts` into the game layer (whichever merges second fixes the import in `src/game/carsBalance.test.ts` and `src/app/testHook.ts`); `feature/bombs` puts bombs on the drift lines of four corners, so after merging it re-run `src/game/carsBalance.test.ts` and re-measure the ladder if a car starts hitting bombs.
 
 **Commands:** `npm test` (all unit suites), `npx vitest run <file>` (one suite), `npm run typecheck`, `npm run build`, `npm run e2e` (GPU) / `npm run e2e:software` (SwiftShader).
 
@@ -179,7 +179,7 @@ Expected: FAIL — `Failed to resolve import "./cars"`.
  * not let a car change them, so collisions and the track's tight spots behave the same for every car. The drift
  * arcs (curvInto / curvNeutral / curvCounter) are never overridden either: the track was laid out for them.
  *
- * Balance (src/app/carsBalance.test.ts): drift points accrue per second of drifting, so raw speed does NOT pay (a
+ * Balance (src/game/carsBalance.test.ts): drift points accrue per second of drifting, so raw speed does NOT pay (a
  * faster car finishes sooner); the drift angle does. Pricier cars hold wider angles: Искра < Квадро < Ронин <
  * Скарабей in autopilot points, and Ронин has the fastest race.
  *
@@ -337,12 +337,12 @@ git commit -m "feat(cars): add the car line-up and per-car tuning"
 ### Task 2: Line-up balance test
 
 **Files:**
-- Test: `src/app/carsBalance.test.ts`
+- Test: `src/game/carsBalance.test.ts`
 
 - [ ] **Step 1: Write the test**
 
 ```ts
-// src/app/carsBalance.test.ts
+// src/game/carsBalance.test.ts
 /**
  * Line-up balance (src/shared/cars.ts): the autopilot drives a full race in every car. Every car must drive it
  * cleanly, pricier cars must score more (drift angle pays, raw speed does not), and Ронин keeps its niche: the
@@ -427,13 +427,13 @@ describe('car line-up balance (autopilot, full race)', () => {
 
 - [ ] **Step 2: Run it**
 
-Run: `npx vitest run src/app/carsBalance.test.ts`
+Run: `npx vitest run src/game/carsBalance.test.ts`
 Expected: PASS (6 tests). If a car fails, the catalogue numbers in Task 1 drifted from the measured ones: compare with the table in «Decisions», do not loosen the thresholds.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/app/carsBalance.test.ts
+git add src/game/carsBalance.test.ts
 git commit -m "test(app): guard the car line-up balance with autopilot races"
 ```
 

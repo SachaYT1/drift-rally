@@ -5,7 +5,7 @@
  * not let a car change them, so collisions and the track's tight spots behave the same for every car. The drift
  * arcs (curvInto / curvNeutral / curvCounter) are never overridden either: the track was laid out for them.
  *
- * Balance (src/app/carsBalance.test.ts): drift points accrue per second of drifting, so raw speed does NOT pay (a
+ * Balance (src/game/carsBalance.test.ts): drift points accrue per second of drifting, so raw speed does NOT pay (a
  * faster car finishes sooner); the drift angle does. Pricier cars hold wider angles: Искра < Квадро < Ронин <
  * Скарабей in autopilot points, and Ронин has the fastest race.
  *
