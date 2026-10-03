@@ -12,7 +12,7 @@ import { createSession } from '../game/session';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { TUNING } from '../shared/tuning';
-import { DEG } from '../shared/math';
+import { DEG, wrapAngle } from '../shared/math';
 import { NEUTRAL_INPUT, type CarState, type GameEvent, type InputFrame } from '../shared/types';
 
 const DT = 1 / TUNING.race.physicsHz;
@@ -40,56 +40,67 @@ describe('wall slide on the Plaza track', () => {
   /**
    * W only into the local colliders. Freed = no contact with obstacle `id` for 0.25 s, at >= 5 m/s, moving
    * forward along the track (> progress.minProgressSpeed-like 2 m/s). Returns the seconds until then (or
-   * Infinity) and the longest run moving back along the track faster than progress.wrongWaySpeed.
+   * Infinity), the heading off the track direction at the last contact once free (deg; NaN if never), and the
+   * longest run moving back along the track faster than progress.wrongWaySpeed.
    */
-  function freeFrom(start: CarState, id: string, seconds = 4): { contactAt: number; freed: number; backward: number } {
+  function freeFrom(
+    start: CarState,
+    id: string,
+    seconds = 4,
+  ): { contactAt: number; freed: number; exitDeg: number; backward: number } {
     let s = start;
     let hint = track.project(s.x, s.z).s;
     let contactAt = Infinity;
     let lastContact = -Infinity;
+    let lastS = hint;
     let backward = 0;
     let run = 0;
     for (let i = 1; i <= Math.round(seconds / DT); i++) {
       s = stepCar(s, W, 'road', DT);
       const r = resolveCollisions(s, track.collidersNear(s.x, s.z, 6));
       s = r.state;
+      const p = track.project(s.x, s.z, hint);
+      hint = p.s;
       if (r.contacts.some((c) => c.colliderId.startsWith(id))) {
         contactAt = Math.min(contactAt, i * DT);
         lastContact = i * DT;
+        lastS = p.s;
       }
-      const p = track.project(s.x, s.z, hint);
-      hint = p.s;
       const tan = track.sampleAt(p.s);
       const ds = s.vx * tan.tx + s.vz * tan.tz;
       run = ds < TUNING.progress.wrongWaySpeed ? run + DT : 0;
       backward = Math.max(backward, run);
       if (contactAt < Infinity && i * DT - lastContact >= 0.25 && s.speed >= 5 && ds > 2) {
-        return { contactAt, freed: lastContact, backward };
+        const at = track.sampleAt(lastS);
+        const exitDeg = wrapAngle(s.heading - Math.atan2(at.tx, at.tz)) / DEG;
+        return { contactAt, freed: lastContact, exitDeg, backward };
       }
     }
-    return { contactAt, freed: Infinity, backward };
+    return { contactAt, freed: Infinity, exitDeg: NaN, backward };
   }
 
-  it('a slow nose-in at the bicycle tyre or the sneaker slides off it within ~1 s with W only', () => {
-    // Without the slide, 7 of these never come free in 6 s and most others take 3-5.5 s.
+  it('a slow nose-in at the bicycle tyre or the sneaker slides off it within ~1.5 s, W only, along the track', () => {
+    // Without the slide, 7 of these never come free in 6 s and most others take 3-5.5 s. Turning the nose to
+    // the obstacle's own surface (play-test 2) freed them in <= 1.2 s but sent the car off the bicycle tyre
+    // 53-56 deg off the track; the bounded deflection leaves within ~30 deg.
     const cases: { label: string; id: string; s: number; lateral: number; yaw: number; limit: number }[] = [];
     // Sneaker (axis s ~1642.6-1647.5 at lateral -5.4, r 1): at its upstream cap, centred, offset and angled.
     for (const lateral of [-5.4, -4.8, -6]) {
       for (const yaw of [0, -15, 15]) {
         const label = `sneaker lat ${lateral} yaw ${yaw}`;
-        cases.push({ label, id: 'sneaker', s: 1638, lateral, yaw: yaw * DEG, limit: 1.2 });
+        cases.push({ label, id: 'sneaker', s: 1638, lateral, yaw: yaw * DEG, limit: 1.5 });
       }
     }
     // Bicycle front tyre (axis from s ~575.2 lat -11.05 to s ~578.2 lat -7.5, r 1.3), at 52 deg to the track
-    // and crossing the right barrier. Nose-first into the corner it forms with the barrier, the car first lines
-    // up with the barrier, then slides off the tyre's end toward the road: up to ~2 s.
+    // and crossing the right barrier. Nose-first into the corner it forms with the barrier (lateral -10.5), the
+    // car slides the length of the tyre's flank (~5 m) to its road-side end: up to ~2 s.
     for (const [lateral, yaws] of [
       [-8, [0, -20]],
       [-9, [0, -20, 20]],
       [-10.5, [0, -20, 20]],
     ] as const) {
       for (const yaw of yaws) {
-        const limit = lateral === -10.5 && yaw === -20 ? 2 : 1.2;
+        const limit = lateral === -10.5 ? 2 : 1.5;
         const label = `bicycle lat ${lateral} yaw ${yaw}`;
         cases.push({ label, id: 'bicycle', s: 570, lateral, yaw: yaw * DEG, limit });
       }
@@ -99,6 +110,7 @@ describe('wall slide on the Plaza track', () => {
         const r = freeFrom(approach(k.s, k.lateral, k.yaw, v), k.id);
         expect(r.contactAt, `${k.label} v ${v}`).toBeLessThan(2);
         expect(r.freed - r.contactAt, `${k.label} v ${v}`).toBeLessThanOrEqual(k.limit);
+        expect(Math.abs(r.exitDeg), `${k.label} v ${v}`).toBeLessThanOrEqual(35);
         // At 5 m/s plus W the first touch can be a heavy hit, whose bounce may roll back for a step or two.
         expect(r.backward, `${k.label} v ${v}`).toBeLessThan(0.25 * TUNING.progress.wrongWayTime);
       }
