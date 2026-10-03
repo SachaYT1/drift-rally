@@ -3,11 +3,12 @@ import * as THREE from 'three';
 import { createCarModel } from './carModel';
 import type { CarBody } from './carParts';
 import { ISKRA } from './bodies/iskra';
+import { QUADRO } from './bodies/quadro';
 import { createCarState } from '../physics/car';
 import { TUNING } from '../shared/tuning';
 
 /** Every body of the line-up (Task 7 replaces this with CAR_BODIES). */
-const BODIES: Record<string, CarBody> = { iskra: ISKRA };
+const BODIES: Record<string, CarBody> = { iskra: ISKRA, quadro: QUADRO };
 const WHEELS = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 
 describe('car models', () => {
