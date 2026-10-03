@@ -45,6 +45,11 @@ function statsHtml(): string {
   ).join('');
 }
 
+/** Seconds for the Russian copy: 0.3 → "0,3", 1.5 → "1,5"; at most two decimals, so float noise never shows. */
+function decimalRu(x: number): string {
+  return String(Math.round(x * 100) / 100).replace('.', ',');
+}
+
 function rulesHtml(): string {
   const sc = TUNING.score;
   const keys: [string, string][] = [
@@ -56,7 +61,7 @@ function rulesHtml(): string {
     [keyHtml('Esc'), 'пауза'],
     [keyHtml('M'), 'звук вкл/выкл'],
   ];
-  const grace = String(sc.graceTime).replace('.', ',');
+  const grace = decimalRu(sc.graceTime);
   return `<h2 class="dr-h dr-modal__title" id="${MODAL_TITLE_ID}">Правила</h2>
     <div class="dr-rules">
       <section><h3>Управление</h3>
@@ -65,7 +70,7 @@ function rulesHtml(): string {
           <li class="dr-eyebrow">В заносе</li>
           <li>${keyHtml('W')} держит занос, отпустите газ — выход</li>
           <li>${keyHtml('A')}${keyHtml('D')} внутрь — круче, наружу — прямее</li>
-          <li>Полный контрруль ~0,3 с — поймать занос и выровняться</li>
+          <li>Полный контрруль ~${decimalRu(TUNING.drift.catchTime)} с — поймать занос и выровняться</li>
           <li>${keyHtml('S')} тормоз и выход из заноса</li>
           <li>${keyHtml('Пробел')} + обратный руль — перекладка</li>
         </ul>

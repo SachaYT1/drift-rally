@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SaveData } from '../shared/types';
+import { TUNING } from '../shared/tuning';
 import { createGarageUI, type GarageUI } from './garage';
 import { enterGarage } from '../app/garageScreen';
 import type { App } from '../app/context';
@@ -44,15 +45,18 @@ describe('garage UI (jsdom)', () => {
   };
 
   describe('rules modal', () => {
+    const driftNotes = (modal: HTMLElement): string[] =>
+      [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
+    const catchNote = (seconds: string): string => `Полный контрруль ~${seconds} с — поймать занос и выровняться`;
+
     it('explains the drift controls of scheme A (design spec §2.3) and what burns the chain', () => {
       mount();
       const modal = openRules();
-      const drift = [...modal.querySelectorAll('.dr-keys-note li')].map((li) => norm(li.textContent).trim());
-      expect(drift).toEqual([
+      expect(driftNotes(modal)).toEqual([
         'В заносе',
         'W держит занос, отпустите газ — выход',
         'AD внутрь — круче, наружу — прямее',
-        'Полный контрруль ~0,3 с — поймать занос и выровняться',
+        catchNote(String(TUNING.drift.catchTime).replace('.', ',')),
         'S тормоз и выход из заноса',
         'Пробел + обратный руль — перекладка',
       ]);
@@ -60,6 +64,22 @@ describe('garage UI (jsdom)', () => {
       expect(text).toContain('Сильный удар или возврат на трассу (R) сжигают цепочку');
       // The arc control lives in the drift list now, not repeated in the scoring rules.
       expect(text).not.toContain('Руль внутрь');
+    });
+
+    it.each([
+      [0.45, '0,45'],
+      [0.5, '0,5'],
+      [0.1 + 0.2, '0,3'], // float noise never reaches the player
+      [1, '1'],
+    ])('shows the catch time TUNING.drift.catchTime = %s as «~%s с»', (seconds, shown) => {
+      const saved = TUNING.drift.catchTime;
+      TUNING.drift.catchTime = seconds;
+      try {
+        mount();
+        expect(driftNotes(openRules())).toContain(catchNote(shown));
+      } finally {
+        TUNING.drift.catchTime = saved;
+      }
     });
 
     it('is labelled by its title', () => {
