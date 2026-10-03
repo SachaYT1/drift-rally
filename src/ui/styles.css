@@ -108,8 +108,8 @@ body { font-family: var(--dr-body); color: var(--dr-text); -webkit-font-smoothin
 .dr-carnav { position: absolute; inset: 0; pointer-events: none; }
 .dr-carnav__btn { pointer-events: auto; position: absolute; top: 50%; width: 2.4em; height: 2.4em; margin-top: -1.2em; display: grid; place-items: center; border: 1px solid var(--dr-border-hi); border-radius: 50%; background: rgb(20 15 14 / 0.6); color: var(--dr-text); font-family: var(--dr-head); font-size: 1.5em; line-height: 1; transition: transform 0.15s var(--dr-ease), border-color 0.15s; }
 .dr-carnav__btn:hover { border-color: var(--dr-coral); transform: scale(1.06); }
-.dr-carnav__btn[data-step="-1"] { left: calc(50% - 6.5em); }
-.dr-carnav__btn[data-step="1"] { right: calc(50% - 6.5em); }
+.dr-carnav__btn[data-step="-1"] { left: 27%; }
+.dr-carnav__btn[data-step="1"] { right: 27%; }
 .dr-cta--buy { color: #1a1310; }
 .dr-cta--buy::before { background: linear-gradient(100deg, var(--dr-gold) 0%, #ffd27a 100%); }
 .dr-cta--buy::after { background: var(--dr-gold); }
