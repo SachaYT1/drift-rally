@@ -3,39 +3,22 @@
  * and the continuous race voices:
  * - engine: car speed -> virtual gearbox (gearbox.ts) -> engine rev -> warm petrol-engine voice
  *   (engineVoice.ts, voiced by an EnginePreset from enginePresets.ts; the game uses preset A).
- * - tyre screech: looping white noise -> 2 cascaded bandpasses (centre wobbles a little)
- *   -> gain ∝ drift intensity.
+ * - tyre screech: a pitched stick-slip squeal of the two rear tyres over a low grainy rubber
+ *   scrub, with chirps on drift entry / flicks (screechVoice.ts, voiced by a ScreechPreset from
+ *   screechPresets.ts; the game uses preset A).
  *
  * Both feed a loop bus (on/off fade) -> duck gain (dips under reward cues) -> master.
  *
  * Sources are created and started once (they cannot be restarted); everything else is driven
  * with `setTargetAtTime`, so parameter changes never click. The mapping functions are pure.
  */
-import { clamp, lerp } from '../shared/math';
-import { TUNING } from '../shared/tuning';
+import { clamp } from '../shared/math';
 import type { CarState } from '../shared/types';
 import { DEFAULT_ENGINE_PRESET, type EnginePreset } from './enginePresets';
 import { createEngineVoice, hardSet } from './engineVoice';
 import { initialGearbox, stepGearbox, type GearboxState } from './gearbox';
-
-/** Tyre screech voicing. */
-export const SCREECH_VOICE = {
-  /** Gain at intensity 1 (narrow band-passed white noise is ~ -25 dB, so this is > 1). */
-  level: 1.15,
-  baseHz: 1500,
-  slipHz: 700,
-  /** Band centre rises by this many Hz per m/s. */
-  speedHz: 18,
-  /** Two cascaded bandpasses at this Q: steep skirts give a tonal squeal instead of hiss. */
-  q: 5,
-  wobbleHz: 7.5,
-  wobbleDepthHz: 110,
-  /** Intensity floor while drifting: the tyres are always sliding in a drift. */
-  driftFloor: 0.45,
-  /** Fraction of drift screech for a grip-mode slide (recovery, scrubbing). */
-  slideScale: 0.55,
-  tau: 0.05,
-} as const;
+import { DEFAULT_SCREECH_PRESET, type ScreechPreset } from './screechPresets';
+import { createScreechVoice } from './screechVoice';
 
 /** Fade time constant for activating / silencing the whole loop bus, s. */
 const BUS_TAU = 0.07;
@@ -78,49 +61,6 @@ function unit(v: number): number {
   return Number.isFinite(v) ? clamp(v, 0, 1) : 0;
 }
 
-/**
- * |slip| folded into [0, π/2], rad. slip is heading minus velocity heading, so rolling straight
- * backwards gives |slip| ≈ π: that counts as aligned (reversing never screeches), while a sideways
- * slide screeches whichever way the car is rolling. Non-finite input stays non-finite.
- */
-export function slideAngle(slip: number): number {
-  const a = Math.abs(slip);
-  return a > Math.PI / 2 ? Math.max(0, Math.PI - a) : a;
-}
-
-/**
- * Screech intensity 0..1 from the slide angle and speed. A drift always screeches (floor), wider
- * angles louder; outside a drift only a real slide (above the scoring threshold) screeches.
- */
-export function screechIntensity(car: CarState, drifting: boolean): number {
-  const speed = car.speed;
-  const slip = slideAngle(car.slip);
-  if (!Number.isFinite(speed) || !Number.isFinite(slip)) return 0;
-  const minSpeed = TUNING.drift.minSpeed;
-  const speedK = clamp((speed - minSpeed * 0.25) / minSpeed, 0, 1);
-  if (speedK === 0) return 0;
-  const lo = TUNING.score.minSlip;
-  const slipK = clamp((slip - lo) / (TUNING.drift.slipWide - lo), 0, 1);
-  if (drifting) return speedK * lerp(SCREECH_VOICE.driftFloor, 1, slipK);
-  return speedK * slipK * SCREECH_VOICE.slideScale;
-}
-
-/** Screech band centre, Hz: higher with wider slip and more speed. */
-export function screechFrequency(car: CarState): number {
-  const S = SCREECH_VOICE;
-  const slipK = unit(slideAngle(car.slip) / TUNING.drift.slipWide);
-  const speed = Number.isFinite(car.speed) ? clamp(car.speed, 0, TUNING.car.maxSpeed) : 0;
-  return S.baseHz + S.slipHz * slipK + S.speedHz * speed;
-}
-
-function createBandpass(ctx: BaseAudioContext, hz: number, q: number): BiquadFilterNode {
-  const f = ctx.createBiquadFilter();
-  f.type = 'bandpass';
-  f.frequency.value = hz;
-  f.Q.value = q;
-  return f;
-}
-
 export interface LoopVoices {
   /** Glide engine/screech params toward the car state. `now` = context currentTime. */
   update(car: CarState, throttle: number, drifting: boolean, now: number): void;
@@ -142,16 +82,16 @@ const MAX_STEP = 0.1;
 
 /**
  * Builds the engine + screech graph into `out` and starts its sources. Starts silent.
- * `preset` voices the engine (the game uses DEFAULT_ENGINE_PRESET; the sound lab compares others).
+ * `preset` voices the engine, `screechPreset` the tyres (the game uses the defaults, preset A of
+ * each; the sound lab compares the others).
  */
 export function createLoopVoices(
   ctx: BaseAudioContext,
   out: AudioNode,
   noise: AudioBuffer,
   preset: EnginePreset = DEFAULT_ENGINE_PRESET,
+  screechPreset: ScreechPreset = DEFAULT_SCREECH_PRESET,
 ): LoopVoices {
-  const S = SCREECH_VOICE;
-
   const bus = ctx.createGain();
   bus.gain.value = 0;
   const ducker = ctx.createGain();
@@ -162,32 +102,13 @@ export function createLoopVoices(
   /** Context time of the previous update (null right after a reset). */
   let lastAt: number | null = null;
 
-  // Screech: looping noise through two bandpasses whose centre wobbles a little.
-  const hiss = ctx.createBufferSource();
-  hiss.buffer = noise;
-  hiss.loop = true;
-  const bandA = createBandpass(ctx, S.baseHz, S.q);
-  const bandB = createBandpass(ctx, S.baseHz, S.q);
-  const wobble = ctx.createOscillator();
-  wobble.frequency.value = S.wobbleHz;
-  const wobbleDepth = ctx.createGain();
-  wobbleDepth.gain.value = S.wobbleDepthHz;
-  wobble.connect(wobbleDepth);
-  wobbleDepth.connect(bandA.frequency);
-  wobbleDepth.connect(bandB.frequency);
-  const screechGain = ctx.createGain();
-  screechGain.gain.value = 0;
-  hiss.connect(bandA).connect(bandB).connect(screechGain).connect(bus);
+  const screech = createScreechVoice(ctx, bus, noise, screechPreset);
 
   /** Whether the bus is (fading) on, and the context time from which it is fully silent. */
   let on = false;
   let silentAt = 0;
   /** Params were moved by update() since the last reset to idle. */
   let stale = false;
-
-  const t0 = ctx.currentTime;
-  hiss.start(t0);
-  wobble.start(t0);
 
   return {
     update(car, throttle, drifting, now) {
@@ -199,13 +120,7 @@ export function createLoopVoices(
       if (step.shift !== 0) engine.shift(step.shift, now);
       // Clutch out (up-shift): the throttle is lifted for a moment, so the voice darkens briefly.
       engine.set(gearbox.rev, gearbox.clutch > 0 ? unit(throttle) * SHIFT_LIFT : unit(throttle), now);
-      const k = screechIntensity(car, drifting);
-      screechGain.gain.setTargetAtTime(k * S.level, now, S.tau);
-      if (k > 0) {
-        const hz = screechFrequency(car);
-        bandA.frequency.setTargetAtTime(hz, now, S.tau);
-        bandB.frequency.setTargetAtTime(hz, now, S.tau);
-      }
+      screech.update(car, unit(throttle), drifting, now);
     },
     setActive(next, now, cut = false) {
       if (next) {
@@ -215,17 +130,17 @@ export function createLoopVoices(
           gearbox = initialGearbox(preset.gearbox);
           lastAt = null;
           engine.reset(now);
-          hardSet(screechGain.gain, 0, now);
+          screech.silence(now, true);
         }
         bus.gain.setTargetAtTime(1, now, BUS_TAU);
       } else if (cut) {
         hardSet(bus.gain, 0, now);
-        hardSet(screechGain.gain, 0, now);
+        screech.silence(now, true);
         silentAt = now;
       } else if (on) {
         bus.gain.setTargetAtTime(0, now, BUS_TAU);
         // Never resume with a stale screech.
-        screechGain.gain.setTargetAtTime(0, now, S.tau);
+        screech.silence(now, false);
         silentAt = now + BUS_SILENT_AFTER;
       }
       on = next;

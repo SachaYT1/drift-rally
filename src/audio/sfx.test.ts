@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudio, MASTER_LEVEL, MAX_VOICES, type GameAudio } from './sfx';
-import { LOOP_DUCK, screechFrequency, screechIntensity } from './engine';
+import { LOOP_DUCK } from './engine';
 import { DEFAULT_ENGINE_PRESET, enginePitch } from './enginePresets';
 import { FakeCtx, FakeGain, FakeNode, FakeSource, gainsBetween, loopSources, masterOf, pathGain, type Call } from './fakeWebAudio';
 import { TUNING } from '../shared/tuning';
@@ -73,34 +73,6 @@ describe('audio without Web Audio (node)', () => {
   });
 });
 
-describe('screech mappings', () => {
-  it('screech follows slip and speed, is loud in a drift, silent otherwise', () => {
-    const fast = TUNING.drift.minSpeed * 2;
-    expect(screechIntensity(car({ speed: fast }), false)).toBe(0);
-    expect(screechIntensity(car({ speed: fast, slip: TUNING.score.minSlip * 0.5 }), false)).toBe(0);
-    expect(screechIntensity(car({ speed: 0.5, slip: 40 * DEG }), true)).toBe(0);
-    const narrow = screechIntensity(car({ speed: fast, slip: TUNING.drift.slipNarrow }), true);
-    const wide = screechIntensity(car({ speed: fast, slip: -TUNING.drift.slipWide }), true);
-    expect(narrow).toBeGreaterThan(0.3);
-    expect(wide).toBeGreaterThan(narrow);
-    expect(wide).toBeLessThanOrEqual(1);
-    const slide = screechIntensity(car({ speed: fast, slip: TUNING.drift.slipWide }), false);
-    expect(slide > 0 && slide < wide).toBe(true);
-    expect(screechIntensity(car({ speed: NaN, slip: NaN }), true)).toBe(0);
-  });
-
-  it('reversing does not screech; a sideways slide does whichever way the car rolls', () => {
-    const v = TUNING.car.maxReverseSpeed;
-    const back = (slip: number): CarState => car({ speed: v, forwardSpeed: -v, slip });
-    expect(screechIntensity(back(Math.PI), false)).toBe(0);
-    expect(screechIntensity(back(-Math.PI + 5 * DEG), false)).toBe(0);
-    const side = screechIntensity(car({ speed: v, forwardSpeed: v, slip: 40 * DEG }), false);
-    expect(side).toBeGreaterThan(0);
-    expect(screechIntensity(back(Math.PI - 40 * DEG), false)).toBeCloseTo(side);
-    expect(screechFrequency(back(Math.PI))).toBeCloseTo(screechFrequency(car({ speed: v })));
-  });
-});
-
 describe('audio graph (fake AudioContext)', () => {
   it('unlock builds master gain -> compressor -> destination once and resumes', async () => {
     const { ctx, audio, made, master, engine, screech } = await started();
@@ -111,7 +83,7 @@ describe('audio graph (fake AudioContext)', () => {
     expect(ctx.state).toBe('running');
     const nodeCount = ctx.nodes.length;
     expect(engine).toHaveLength(3); // saw, triangle, sub-octave sine
-    expect(screech).toHaveLength(1);
+    expect(screech).toHaveLength(3); // two tyre oscillators + the scrub noise
     await audio.unlock();
     expect(made()).toBe(1);
     expect(ctx.nodes.length).toBe(nodeCount);
