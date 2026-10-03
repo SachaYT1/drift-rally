@@ -128,6 +128,61 @@ describe('car tuning: drift.*', () => {
     expect(run(fast, 1, script, hardBrakes, 'runoff')).toEqual(run(fast, 1, script, TUNING, 'runoff'));
   });
 
+  it('catchSteer sets how much counter-steer catches the slide', () => {
+    const counter = () => inp({ throttle: 1, steer: -0.7 });
+    expect(run(leftDrift(), 1, counter).every((s) => s.mode === 'drift')).toBe(true);
+    expect(run(leftDrift(), 1, counter, withDrift({ catchSteer: 0.6 })).some((s) => s.mode === 'grip')).toBe(true);
+  });
+
+  it('catchTime sets how long the full counter-steer must be held', () => {
+    const exitAt = (t: Tuning) => (run(leftDrift(), 2, () => inp({ throttle: 1, steer: -1 }), t).findIndex((s) => s.mode === 'grip') + 1) * DT;
+    const c = TUNING.drift.catchTime;
+    expect(exitAt(TUNING)).toBeCloseTo(c, 1);
+    expect(exitAt(withDrift({ catchTime: 2 * c }))).toBeCloseTo(2 * c, 1);
+  });
+
+  /** Velocity-heading change 0.6 s after a lift exit (steer released), and the states after the exit. */
+  function liftExit(t: Tuning): { turn: number; after: CarState[] } {
+    const trace = run(leftDrift(), 1.5, () => inp(), t);
+    const exit = trace.findIndex((s) => s.mode === 'grip');
+    const a = trace[exit - 1];
+    const b = trace[exit + Math.round(0.6 / DT)];
+    return { turn: Math.abs(Math.atan2(b.vx, b.vz) - Math.atan2(a.vx, a.vz)), after: trace.slice(exit) };
+  }
+
+  it('exitAlignTime sets how long a drift exit keeps the path while the body swings back', () => {
+    expect(liftExit(TUNING).turn).toBeLessThan(8 * DEG);
+    expect(liftExit(withDrift({ exitAlignTime: 0 })).turn).toBeGreaterThan(20 * DEG);
+  });
+
+  it('exitAlignResponse sets how fast the body swings back after a drift', () => {
+    const slipAt = (k: number) => Math.abs(liftExit(withDrift({ exitAlignResponse: k })).after[Math.round(0.15 / DT)].slip);
+    const k = TUNING.drift.exitAlignResponse;
+    expect(slipAt(2 * k)).toBeLessThan(slipAt(k) - 3 * DEG);
+    expect(slipAt(k / 2)).toBeGreaterThan(slipAt(k) + 3 * DEG);
+  });
+
+  it('exitAlignMaxYawRate caps the yaw rate of the swing', () => {
+    const cap = 1;
+    const after = liftExit(withDrift({ exitAlignMaxYawRate: cap })).after.slice(0, Math.round(TUNING.drift.exitAlignTime / DT));
+    expect(Math.max(...after.map((s) => Math.abs(s.yawRate)))).toBeCloseTo(cap, 6);
+  });
+
+  /** Drift speed after `seconds` on W with relative steer `u`, kicked at 22 m/s. */
+  function driftSpeed(u: number, seconds: number, t: Tuning): number {
+    const kick = stepCar(moving(0, 22), inp({ throttle: 1, steer: 1, handbrake: true, handbrakePressed: true }), 'road', DT, t);
+    return last(run(kick, seconds, () => inp({ throttle: 1, steer: u }), t)).speed;
+  }
+
+  it('driftTopSpeed sets where drift thrust fades out', () => {
+    const top = TUNING.drift.driftTopSpeed;
+    expect(driftSpeed(0, 20, withDrift({ driftTopSpeed: top - 8 }))).toBeLessThan(driftSpeed(0, 20, TUNING) - 3);
+  });
+
+  it('topStraight sets the drift top speed on a straight (counter-steered) path', () => {
+    expect(driftSpeed(-0.8, 8, withDrift({ topStraight: 1 }))).toBeGreaterThan(driftSpeed(-0.8, 8, TUNING) + 2);
+  });
+
   /** Recover state as collision.ts leaves it: heading 0, sliding forward at 60 deg. */
   const recovering = (speed: number): CarState => ({
     ...moving(speed * Math.sin(60 * DEG), speed * Math.cos(60 * DEG)),

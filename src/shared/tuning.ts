@@ -65,15 +65,23 @@ export const TUNING = {
     /** Body yaw tracking toward (velocity heading + target slip). */
     bodyResponse: 8,
     bodyMaxYawRate: 4,
-    /** Speed change while drifting: -(dragBase + dragSlip*|sin slip|) + thrust*throttle, m/s^2. */
+    /**
+     * Speed change while drifting: -(dragBase + dragSlip*|sin slip|) + thrust*throttle*fade, m/s^2, with
+     * fade = 1 - (speed / top)^2 (floored at 0): a drift on W settles at a steady speed instead of running
+     * to the drift cap. top = driftTopSpeed, scaled down to topStraight times that at zero path curvature
+     * (blending back to 1 at curvNeutral): a counter-steered drift slides at a narrower angle and drags
+     * less, so without this it would outrun a neutral drift down a straight (the "drift highway").
+     */
     dragBase: 3,
     dragSlip: 6,
     thrust: 9,
+    driftTopSpeed: 57,
+    topStraight: 0.75,
     /** Drift speed cap as a fraction of car.maxSpeed. */
     maxSpeedFactor: 0.9,
     /** Seconds without throttle and handbrake before the drift ends. */
     exitDelay: 0.25,
-    /** Seconds for lateral grip to blend back to normal after a drift. */
+    /** Seconds for lateral grip (and, during the exit phase, steering authority) to blend back after a drift. */
     gripBlendTime: 0.3,
     /** Lateral decay rate at the start of the grip blend, 1/s. */
     gripDrift: 1.5,
@@ -84,6 +92,21 @@ export const TUNING = {
      * still flicks (holding Space while the steer crosses over flicks too).
      */
     flickWindow: 0.12,
+    /**
+     * Catch: full counter-steer (steer * driftDir <= -catchSteer) held for catchTime seconds with Space
+     * released ends the drift. Partial counter-steer keeps drifting; Space held keeps the slide.
+     */
+    catchSteer: 0.85,
+    catchTime: 0.3,
+    /**
+     * Every drift exit keeps the direction of travel: for exitAlignTime seconds the path only turns by
+     * steering (authority blending in with gripBlend) while the body swings to the velocity heading as a
+     * critically damped spring (natural frequency exitAlignResponse, 1/s; no overshoot), its yaw rate
+     * capped at exitAlignMaxYawRate, rad/s.
+     */
+    exitAlignTime: 0.5,
+    exitAlignResponse: 10,
+    exitAlignMaxYawRate: 4,
     /** Brake (S) in a drift scrubs speed at car.brakeDecel times this. */
     brakeFactor: 0.6,
     /** Seconds of brake held before a drift ends (grip blends back in as on a normal exit). */

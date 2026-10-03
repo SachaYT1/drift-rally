@@ -41,6 +41,7 @@ describe('car physics', () => {
     const c = createCarState(1, 2, 0.5);
     expect(c.mode).toBe('grip');
     expect(c.speed).toBe(0);
+    expect(c).toMatchObject({ flickArm: 0, catchTimer: 0, exitAlign: 0 });
     for (const v of Object.values(c)) if (typeof v === 'number') expect(Number.isFinite(v)).toBe(true);
   });
 
@@ -268,7 +269,8 @@ describe('car physics: edge cases', () => {
     // Changed by the final review (flick-fails-space-first): Space held while the steer CROSSES over to
     // the opposite side now flicks (car.driftControls.test.ts). A counter-steer held before Space, with
     // the wheel already past -flickSteer, still needs a fresh press.
-    const across = run(establishedLeftDrift(), 0.4, () => inp({ throttle: 1, steer: -1 })).s;
+    // Held shorter than drift.catchTime: a longer full counter-steer would catch the slide.
+    const across = run(establishedLeftDrift(), TUNING.drift.catchTime * 0.85, () => inp({ throttle: 1, steer: -1 })).s;
     expect(across.mode).toBe('drift');
     expect(across.steer).toBeLessThanOrEqual(-TUNING.drift.flickSteer);
     const { trace } = run(across, 0.3, () => inp({ throttle: 1, steer: -1, handbrake: true }));
