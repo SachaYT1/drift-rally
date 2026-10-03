@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Dev tool: screenshot a page with software WebGL and report console errors.
+ * Dev tool: screenshot a page (real GPU by default, SHOT_SOFTWARE=1 for SwiftShader) and report console errors.
  *
  * Usage: node scripts/screenshot.mjs <url> <out.png> [width=1280] [height=720] [waitMs=2500]
  * The page may set `window.__previewReady = true` to signal it finished rendering;
@@ -14,9 +14,13 @@ if (!url || !out) {
   process.exit(2);
 }
 
-const browser = await chromium.launch({
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+// Default: new headless Chromium on the real GPU (Metal on macOS). SHOT_SOFTWARE=1 forces SwiftShader.
+const software = process.env.SHOT_SOFTWARE === '1';
+const browser = await chromium.launch(
+  software
+    ? { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] }
+    : { channel: 'chromium', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] },
+);
 const page = await browser.newPage({ viewport: { width: Number(w), height: Number(h) } });
 const errors = [];
 page.on('console', (m) => {
