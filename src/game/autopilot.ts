@@ -1,7 +1,7 @@
 /**
- * Drift-aware pure-pursuit autopilot. Used by the ?test hook and the session tests to drive whole races
- * and by FPS measurements; not part of normal play. Pure: reads the session state and the track, returns
- * one InputFrame per fixed step.
+ * Drift-aware pure-pursuit autopilot. Drives the ghost bots (src/game/bots.ts, one style per level), the ?test
+ * hook, the session tests and FPS measurements. Pure: reads the session state and the track, returns one
+ * InputFrame per fixed step.
  *
  * Grip: steer by body heading (inverse bicycle model), brake for the grip lateral limit (not for a drift
  * corner), kick a drift into tight corners. Drift: pursue with the VELOCITY heading and map the required
@@ -15,7 +15,7 @@ import { NEUTRAL_INPUT, type Collider, type InputFrame } from '../shared/types';
 import { TUNING, type Tuning } from '../shared/tuning';
 import { clamp, loopDelta, wrapAngle } from '../shared/math';
 import type { Track } from '../track/build';
-import type { SessionState } from '../game/session';
+import type { SessionState } from './session';
 
 /** Autopilot constants (test driving style, not game tuning). */
 export const AUTOPILOT = {

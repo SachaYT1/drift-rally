@@ -10,7 +10,7 @@ import type { RacePhase } from '../game/session';
 import type { App, ScreenName } from './context';
 import type { RaceScreen } from './raceScreen';
 import type { InputSource } from './raceRun';
-import { createAutopilot } from './autopilot';
+import { createAutopilot } from '../game/autopilot';
 
 export interface GameTestState {
   screen: ScreenName;

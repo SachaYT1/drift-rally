@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAutopilot } from './autopilot';
-import { createSession } from '../game/session';
+import { createSession } from './session';
 import { buildTrack } from '../track/build';
 import { PLAZA } from '../track/plaza';
 import { TUNING } from '../shared/tuning';
