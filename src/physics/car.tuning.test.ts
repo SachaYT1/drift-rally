@@ -115,6 +115,29 @@ describe('car tuning: drift.*', () => {
     expect(wide).toBeGreaterThan(def + 5 * DEG);
   });
 
+  it('handbrakeDecel sets the drift deceleration while Space is held, on top of the drift drag (no engine drive)', () => {
+    const s = atSpeed(leftDrift(), 25);
+    const space = inp({ throttle: 1, steer: 0.3, handbrake: true });
+    const drag = TUNING.drift.dragBase + TUNING.drift.dragSlip * Math.abs(Math.sin(s.slip));
+    for (const decel of [TUNING.drift.handbrakeDecel, 2 * TUNING.drift.handbrakeDecel]) {
+      const next = stepCar(s, space, 'road', DT, withDrift({ handbrakeDecel: decel }));
+      expect(next.mode).toBe('drift');
+      expect(s.speed - next.speed).toBeCloseTo((drag + decel) * DT, 9);
+    }
+  });
+
+  it('handbrakeGripDecel sets the deceleration while Space is held in grip (no engine drive)', () => {
+    const cruise = moving(0, 20);
+    const space = inp({ throttle: 1, handbrake: true });
+    const v = cruise.speed;
+    const drag = TUNING.car.rollingResistance + TUNING.car.airDrag * v * v;
+    for (const decel of [TUNING.drift.handbrakeGripDecel, 2 * TUNING.drift.handbrakeGripDecel]) {
+      const next = stepCar(cruise, space, 'road', DT, withDrift({ handbrakeGripDecel: decel }));
+      expect(next.mode).toBe('grip');
+      expect(v - next.speed).toBeCloseTo((drag + decel) * DT, 9);
+    }
+  });
+
   it('overspeedDecel sets the bleed above the drift cap, independent of car.brakeDecel', () => {
     let fast = stepCar(moving(0, TUNING.car.maxSpeed * 0.9), inp({ throttle: 1, steer: 1, handbrake: true, handbrakePressed: true }), 'road', DT);
     fast = last(run(fast, 0.5, () => inp({ throttle: 1, steer: 0.3 })));

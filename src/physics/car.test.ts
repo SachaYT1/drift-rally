@@ -212,14 +212,19 @@ describe('car physics: edge cases', () => {
     expect(s.mode).toBe('grip');
   });
 
-  it('holding Space without throttle keeps the drift alive past exitDelay', () => {
+  it('holding Space without throttle does not keep the drift alive: it ends after exitDelay (spec §2.3)', () => {
+    // Changed by the handbrake rework (player: "you can just hold Space and drift forever"): only throttle
+    // sustains a drift; Space held used to stop the lift timer.
     const { trace } = run(establishedLeftDrift(), TUNING.drift.exitDelay * 2, () => inp({ handbrake: true, steer: 0.3 }));
-    expect(trace.every((x) => x.mode === 'drift')).toBe(true);
+    const exitIdx = trace.findIndex((s) => s.mode === 'grip');
+    expect(exitIdx).toBeGreaterThan(-1);
+    expect(exitIdx * DT).toBeLessThanOrEqual(TUNING.drift.exitDelay + 1e-9);
   });
 
-  it('a drift on the handbrake alone bleeds speed and ends below the minimum speed', () => {
-    const { s, trace } = run(establishedLeftDrift(), 5, () => inp({ handbrake: true, steer: 1 }));
+  it('a drift on the handbrake alone ends, then the handbrake brakes the car below the drift speed', () => {
+    const { s, trace } = run(establishedLeftDrift(), 3, () => inp({ handbrake: true, steer: 1 }));
     for (let i = 1; i < trace.length; i++) expect(trace[i].speed).toBeLessThanOrEqual(trace[i - 1].speed + 1e-9);
+    expect(trace.findIndex((x) => x.mode === 'grip') * DT).toBeLessThanOrEqual(TUNING.drift.exitDelay + 1e-9);
     expect(s.mode).toBe('grip');
     expect(s.driftDir).toBe(0);
     expect(s.speed).toBeLessThan(TUNING.drift.minSpeed);

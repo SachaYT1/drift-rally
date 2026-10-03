@@ -56,6 +56,8 @@ describe('garage UI (jsdom)', () => {
       expect(driftNotes(modal)).toEqual([
         'В заносе',
         'W держит занос, отпустите газ — выход',
+        // Space no longer sustains a drift (handbrake rework, spec §2.3): taps only, holding it bleeds speed.
+        'Пробел — войти в занос или подкрутить коротким нажатием; долго держать — машина теряет скорость',
         'AD внутрь — круче, наружу — прямее',
         CATCH_NOTE,
         'S тормоз и выход из заноса',
