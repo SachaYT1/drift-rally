@@ -28,6 +28,15 @@ describe('hudViewOf', () => {
   });
 });
 
+describe('hudViewOf after the finish', () => {
+  it('shows 0 km/h for the car frozen at the line', () => {
+    const st = createSession(track).state();
+    const moving = { ...st, phase: 'racing' as const, car: { ...st.car, speed: 30 } };
+    expect(hudViewOf(moving).speed).toBe(30);
+    expect(hudViewOf({ ...moving, phase: 'finished' }).speed).toBe(0);
+  });
+});
+
 describe('hintVisible', () => {
   const base = createSession(track).state();
   const at = (phase: SessionState['phase'], time: number): SessionState => ({ ...base, phase, time });

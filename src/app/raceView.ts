@@ -13,7 +13,8 @@ export function hudViewOf(st: Readonly<SessionState>): HudView {
     time: st.time,
     bestLap: st.bestLap,
     coins: st.pickups.coinsPicked,
-    speed: st.car.speed,
+    // The session freezes the car at the finish: it no longer moves, so the speedometer drops to 0.
+    speed: st.phase === 'finished' ? 0 : st.car.speed,
     chainPoints: st.score.chainPoints,
     multiplier: st.score.multiplier,
     chainPhase: st.score.phase,
