@@ -32,6 +32,15 @@ interface StepContext {
 
 type ModeFields = Pick<CarState, 'mode' | 'driftDir' | 'driftTime' | 'gripBlend' | 'modeTimer'>;
 
+/** Physics-private memory on stepCar results, outside the shared CarState contract (absent = nothing remembered). */
+interface CarMemory {
+  /** Seconds a recent Space press stays armed for a flick (drift.flickWindow), counting down. */
+  flickArm?: number;
+}
+
+/** Mode-machine result: the mode fields plus the updated flick arm. */
+type ModeStep = ModeFields & { flickArm: number };
+
 /** Velocity and yaw rate produced by one integration step. */
 interface Motion {
   vx: number;
@@ -43,6 +52,8 @@ type Derived = Pick<CarState, 'speed' | 'forwardSpeed' | 'lateralSpeed' | 'slip'
 
 /** m/s; below this the velocity direction is noise, so slip is 0 whatever car.slipMinSpeed says. */
 const SLIP_SPEED_EPSILON = 1e-6;
+/** m/s; a smaller |forward speed| is rounding noise (e.g. sliding exactly sideways) and counts as 0. */
+const FORWARD_SPEED_EPSILON = 1e-6;
 
 export function createCarState(x: number, z: number, heading: number): CarState {
   return {
@@ -101,7 +112,7 @@ export function stepCar(
   const derived = derive(heading, motion.vx, motion.vz, t);
   const share = t.car.rpmSpeedShare;
   const rpm = (Math.abs(derived.forwardSpeed) / t.car.maxSpeed) * share + ctx.throttle * (1 - share);
-  const next: CarState = {
+  const next: CarState & Required<CarMemory> = {
     x: state.x + motion.vx * dt,
     z: state.z + motion.vz * dt,
     heading,
@@ -118,6 +129,7 @@ export function stepCar(
     wheelSpin: state.wheelSpin + (derived.forwardSpeed / t.car.wheelRadius) * dt,
     ...derived,
     rpm: clamp(rpm, 0, 1),
+    flickArm: m.flickArm,
   };
 
   // 7. Defensive: never let a non-finite value escape the simulation.
@@ -187,15 +199,19 @@ function surfaceParams(kind: SurfaceKind, t: Tuning): SurfaceParams {
 }
 
 /** 3. Mode state machine. */
-function nextMode(s: CarState, c: StepContext): ModeFields {
-  const cur: ModeFields = {
+function nextMode(s: CarState & CarMemory, c: StepContext): ModeStep {
+  const d = c.t.drift;
+  // A Space press arms a flick for flickWindow seconds; the kick or flick it triggers consumes it.
+  const armLeft = Math.max(0, (s.flickArm ?? 0) - c.dt);
+  const cur: ModeStep = {
     mode: s.mode,
     driftDir: s.driftDir,
     driftTime: s.driftTime,
     gripBlend: s.gripBlend,
     modeTimer: s.modeTimer,
+    flickArm: c.handbrakePressed ? d.flickWindow : armLeft,
   };
-  const d = c.t.drift;
+  const braking = c.brake > 0;
 
   if (s.mode === 'recover') {
     const modeTimer = s.modeTimer - c.dt;
@@ -204,31 +220,46 @@ function nextMode(s: CarState, c: StepContext): ModeFields {
 
   if (s.mode === 'grip') {
     // A Space press kicks; holding Space (not drifting) kicks as soon as the other conditions hold.
-    // Zero steer never kicks, so a live-edited kickSteerThreshold of 0 cannot pick a side.
+    // Zero steer never kicks, so a live-edited kickSteerThreshold of 0 cannot pick a side. The brake
+    // blocks the kick: S ends a drift, so Space + S would flap between drift and grip.
     const kick =
       (c.handbrakePressed || c.handbrake) &&
+      !braking &&
       c.speed >= d.minSpeed &&
       c.vf > 0 &&
       c.steerInput !== 0 &&
       Math.abs(c.steerInput) >= d.kickSteerThreshold;
     if (!kick) return cur;
-    return { ...cur, mode: 'drift', driftDir: c.steerInput > 0 ? 1 : -1, driftTime: 0, modeTimer: 0 };
+    return { ...cur, mode: 'drift', driftDir: c.steerInput > 0 ? 1 : -1, driftTime: 0, modeTimer: 0, flickArm: 0 };
   }
 
   // Drift.
   if (c.speed < d.minSpeed * d.holdSpeedFactor || c.vf <= 0) return exitDrift(cur);
+  // Exit timer: S held ends the drift after brakeExitTime; throttle and Space both released after exitDelay.
   let modeTimer = 0;
-  if (c.throttle < d.throttleMin && !c.handbrake) {
+  if (braking || (c.throttle < d.throttleMin && !c.handbrake)) {
     modeTimer = s.modeTimer + c.dt;
-    if (modeTimer >= d.exitDelay) return exitDrift(cur);
+    if (modeTimer >= (braking ? d.brakeExitTime : d.exitDelay)) return exitDrift(cur);
   }
-  const flick = s.driftDir !== 0 && c.handbrakePressed && c.steerInput * s.driftDir <= -d.flickSteer;
-  const driftDir = flick ? (s.driftDir === 1 ? -1 : 1) : s.driftDir;
-  return { ...cur, driftDir, modeTimer };
+  return isFlick(s, c, armLeft > 0)
+    ? { ...cur, driftDir: s.driftDir === 1 ? -1 : 1, modeTimer, flickArm: 0 }
+    : { ...cur, modeTimer };
+}
+
+/**
+ * Flick: strong opposite steer (steerInput * driftDir <= -flickSteer) with a Space press before or after it
+ * (`armed`: pressed within flickWindow, even if released), or with Space held while the steer crosses over
+ * (the smoothed wheel s.steer has not passed -flickSteer yet). A drift without a direction never flicks.
+ */
+function isFlick(s: CarState, c: StepContext, armed: boolean): boolean {
+  const flickSteer = c.t.drift.flickSteer;
+  if (s.driftDir === 0 || c.steerInput * s.driftDir > -flickSteer) return false;
+  const crossing = c.handbrake && s.steer * s.driftDir > -flickSteer;
+  return c.handbrakePressed || armed || crossing;
 }
 
 /** Entering grip from drift: lateral grip blends back in from gripDrift. */
-function exitDrift(cur: ModeFields): ModeFields {
+function exitDrift(cur: ModeStep): ModeStep {
   return { ...cur, mode: 'grip', driftDir: 0, driftTime: 0, gripBlend: 0, modeTimer: 0 };
 }
 
@@ -252,10 +283,11 @@ function integrateGrip(
   const targetYaw = clamp((vf * Math.tan(angle)) / car.wheelBase, -yawCap, yawCap);
   const response = damp(car.yawResponse, c.dt);
   let yawRate = s.yawRate + (targetYaw - s.yawRate) * response;
-  if (m.mode === 'recover' && c.speed > c.t.drift.recoverMinSpeed && c.vf > 0) {
-    // Additionally ease the body toward the velocity heading, only while moving forward: after a
-    // head-on bounce the velocity points backwards (error ~ +-pi) and easing would spin the car.
-    const recoverYaw = wrapAngle(c.phi - c.h) * c.t.drift.recoverYawGain;
+  const error = wrapAngle(c.phi - c.h);
+  if (m.mode === 'recover' && c.speed > c.t.drift.recoverMinSpeed && Math.abs(error) <= c.t.drift.recoverMaxAngle) {
+    // Also ease the body toward the velocity heading, sideways slides included (|slip| ~ 90 deg after a drift
+    // into a barrier), but not when moving backwards: after a head-on bounce (error ~ +-pi) it would spin.
+    const recoverYaw = error * c.t.drift.recoverYawGain;
     yawRate += (recoverYaw - yawRate) * response;
   }
 
@@ -275,14 +307,18 @@ function integrateLongitudinal(
 ): { vf: number; reverseHold: number } {
   const car = c.t.car;
   const dt = c.dt;
-  let vf = vf0;
+  let vf = Math.abs(vf0) < FORWARD_SPEED_EPSILON ? 0 : vf0;
 
+  // Throttle while rolling backwards brakes toward 0; the rest of the step after stopping drives forward.
+  let driveTime = dt;
+  if (vf < 0 && c.throttle > 0) {
+    const stopTime = -vf / (car.brakeDecel * c.throttle);
+    driveTime = Math.max(0, dt - stopTime);
+    vf = stopTime < dt ? 0 : vf + car.brakeDecel * c.throttle * dt;
+  }
   if (vf >= 0) {
     const ratio = vf / c.surf.maxSpeed;
-    vf += car.engineAccel * c.throttle * (1 - ratio * ratio) * dt;
-  } else {
-    // Throttle while rolling backwards brakes toward 0.
-    vf = Math.min(0, vf + car.brakeDecel * c.throttle * dt);
+    vf += car.engineAccel * c.throttle * (1 - ratio * ratio) * driveTime;
   }
 
   // reverseHold counts only while the brake is held near standstill.
@@ -319,7 +355,8 @@ function integrateDrift(c: StepContext, driftDir: -1 | 0 | 1): Motion {
   const accel =
     -(d.dragBase + d.dragSlip * Math.abs(Math.sin(c.slip))) -
     c.surf.dragExtra -
-    (c.handbrake ? d.handbrakeDecel : 0) +
+    (c.handbrake ? d.handbrakeDecel : 0) -
+    d.brakeFactor * c.t.car.brakeDecel * c.brake +
     d.thrust * c.throttle;
   const speed = Math.max(0, capDriftSpeed(c.speed, c.speed + accel * c.dt, d.maxSpeedFactor * c.surf.maxSpeed, c));
 

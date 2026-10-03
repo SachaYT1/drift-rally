@@ -53,10 +53,13 @@ export const TUNING = {
     slipMid: 30 * DEG,
     slipWide: 45 * DEG,
     slipMax: 55 * DEG,
-    /** Path curvature (1/m) when steering into the drift / neutral / counter-steering. */
+    /**
+     * Path curvature (1/m) when steering into the drift / neutral / counter-steering. Full counter-steer
+     * (0) runs a straight line while the car keeps sliding.
+     */
     curvInto: 1 / 20,
     curvNeutral: 1 / 38,
-    curvCounter: 1 / 90,
+    curvCounter: 0,
     handbrakeCurvBoost: 1.25,
     handbrakeDecel: 3,
     /** Body yaw tracking toward (velocity heading + target slip). */
@@ -76,6 +79,15 @@ export const TUNING = {
     gripDrift: 1.5,
     /** steer * driftDir below -flickSteer + a Space press flips the drift direction. */
     flickSteer: 0.6,
+    /**
+     * Seconds a Space press stays armed for a flick, so Space pressed slightly before the opposite steer
+     * still flicks (holding Space while the steer crosses over flicks too).
+     */
+    flickWindow: 0.12,
+    /** Brake (S) in a drift scrubs speed at car.brakeDecel times this. */
+    brakeFactor: 0.6,
+    /** Seconds of brake held before a drift ends (grip blends back in as on a normal exit). */
+    brakeExitTime: 0.15,
     recoverTime: 0.4,
     /** A drift ends when speed drops below minSpeed times this factor. */
     holdSpeedFactor: 0.75,
@@ -89,6 +101,11 @@ export const TUNING = {
     recoverMinSpeed: 3,
     /** Recovery yaw-rate target per radian of heading error, 1/s. */
     recoverYawGain: 4,
+    /**
+     * Recovery eases the body only while the velocity heading is within this angle of the body heading,
+     * rad: a car sliding sideways (~90 deg) eases; one moving backwards after a head-on bounce would spin.
+     */
+    recoverMaxAngle: 100 * DEG,
   },
   surface: {
     runoff: { grip: 0.75, dragExtra: 2.5, maxSpeed: 25 },
