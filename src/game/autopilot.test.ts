@@ -184,7 +184,8 @@ describe('autopilot', () => {
         expect(end.phase).toBe('finished');
         return r;
       };
-      const kept = run({ keepChain: 1 });
+      // A sliding car swings over slowly: keeping the chain needs the wider bomb clearance the master uses.
+      const kept = run({ keepChain: 1, bombClearance: 5 });
       expect(kept.steps).toBeGreaterThan(0);
       expect(kept.idle).toBe(0);
       expect(kept.belowTop).toBe(0);

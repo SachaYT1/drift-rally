@@ -23,7 +23,9 @@ sounds or tyre effects, a ghost toggle in the pause menu.
 | `master` | «Мастер» | ~90 000 (accepted ≥ 85 000) | violet |
 
 Reference points (2026-10-04): today's autopilot scores 51 365 in 174.9 s (laps 59.6 / 57.7 / 57.6 s); the
-friends table holds 120 343, 93 284, 64 946 and 25 657. Bots score under exactly the player's rules (chains,
+friends table holds 120 343, 93 284, 64 946 and 25 657. With the v0.4.0 bombs (rebased onto develop): rookie
+23 135, pro 51 871, master 92 394; no bot touches a bomb (calibration test), the rookie and the master keep
+`bombClearance` 5 m (3 m ran them into the bicycle-snake bomb every lap, burning the master's single chain). Bots score under exactly the player's rules (chains,
 multiplier, penalties), because each bot runs its own game session.
 
 ### 2.2 In the race

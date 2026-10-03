@@ -22,14 +22,21 @@ export interface BotDef {
 
 /**
  * The levels, weakest first. Target scores over 3 laps of «Площадь» (spec §2.1, pinned by bots.test.ts):
- * rookie 20 000-30 000 (24 777 on 2026-10-04: slower, short drifts that never link into a chain), pro
- * 45 000-55 000 (51 365: the reference autopilot), master >= 85 000 (93 071: one chain from the first kick to
- * the finish at the top multiplier).
+ * rookie 20 000-30 000 (23 135 with the v0.4.0 bombs: slower, short drifts that never link into a chain), pro
+ * 45 000-55 000 (51 871: the reference autopilot), master >= 85 000 (92 394: one chain from the first kick to
+ * the finish at the top multiplier). No bot may touch a bomb (a ghost would be thrown by a blast the player
+ * never sees): the rookie (slow to swing over) and the master (sliding) keep bombClearance 5 m from a bomb's
+ * edge, not 3; 4-6 m works for both, 3 m runs them into the bicycle-snake bomb every lap.
  */
 export const BOTS: readonly BotDef[] = Object.freeze([
-  { id: 'rookie', name: 'Новичок', color: 0x3fd6a0, style: { throttleCap: 0.85, latShare: 0.75, linkDrifts: 0, maxDriftTime: 6.5 } },
+  {
+    id: 'rookie',
+    name: 'Новичок',
+    color: 0x3fd6a0,
+    style: { throttleCap: 0.85, latShare: 0.75, linkDrifts: 0, maxDriftTime: 6.5, bombClearance: 5 },
+  },
   { id: 'pro', name: 'Профи', color: 0x4c8dff, style: {} },
-  { id: 'master', name: 'Мастер', color: 0xb070ff, style: { keepChain: 1, catchMargin: 0.04 } },
+  { id: 'master', name: 'Мастер', color: 0xb070ff, style: { keepChain: 1, catchMargin: 0.04, bombClearance: 5 } },
 ]);
 
 /** Name of the player's row in the standings. */

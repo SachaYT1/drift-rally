@@ -37,7 +37,7 @@ function raceBot(def: BotDef) {
     events.push(...sess.step(drive(sess.state()), { respawn: false }, DT));
   }
   const count = (type: GameEvent['type']) => events.filter((e) => e.type === type).length;
-  return { st: sess.state(), hits: count('hit'), respawns: count('respawn') };
+  return { st: sess.state(), hits: count('hit'), respawns: count('respawn'), bombs: count('bomb') };
 }
 
 describe('bot levels (calibration, spec §2.1 / §3.5)', () => {
@@ -60,6 +60,8 @@ describe('bot levels (calibration, spec §2.1 / §3.5)', () => {
       expect(r.st.result?.lapTimes).toHaveLength(TUNING.race.laps);
       expect(r.respawns).toBe(0);
       expect(r.hits).toBeLessThanOrEqual(2);
+      // The player never sees a bot's blast: a ghost must not be thrown by an invisible bomb.
+      expect(r.bombs).toBe(0);
       expect(r.st.result!.totalPoints).toBeGreaterThanOrEqual(lo);
       expect(r.st.result!.totalPoints).toBeLessThanOrEqual(hi);
     });
