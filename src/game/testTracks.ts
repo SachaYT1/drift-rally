@@ -1,12 +1,12 @@
 import type { Track } from '../track/build';
 import { TUNING, barrierOffset } from '../shared/tuning';
 import { loopDelta, wrapLength } from '../shared/math';
-import type { Collider, CoinSpot, LightPropSpot, Pose, SurfaceKind } from '../shared/types';
+import type { BombSpot, Collider, CoinSpot, LightPropSpot, Pose, SurfaceKind } from '../shared/types';
 
 /** Circle of radius R driven left (CCW in the heading sense). s = 0 at (0,0) heading +z. Centre (R, 0). */
 export function makeCircleTrack(
   R = 100,
-  extras: { coins?: CoinSpot[]; lightProps?: LightPropSpot[]; walls?: Collider[] } = {},
+  extras: { coins?: CoinSpot[]; lightProps?: LightPropSpot[]; bombs?: BombSpot[]; walls?: Collider[] } = {},
 ): Track {
   const L = 2 * Math.PI * R;
   const B = barrierOffset();
@@ -49,6 +49,7 @@ export function makeCircleTrack(
     collidersNear: () => walls,
     coins: extras.coins ?? [],
     lightProps: extras.lightProps ?? [],
+    bombs: extras.bombs ?? [],
     heavyPlacements: [],
     decor: [],
     respawnMarkers: markers,

@@ -242,7 +242,7 @@ describe('session: laps and result', () => {
     expect(fresh.st.pickups.coinsPicked).toBeGreaterThan(fresh.st.pickups.coinsTaken.size);
   });
 
-  it('plaza keeps coins and light props out of reach of the car on the lap step', () => {
+  it('plaza keeps coins, light props and bombs out of reach of the car on the lap step', () => {
     // Pickups run before the lap reset within a step, so an item still touching the car when the lap
     // completes would be collected (or penalised) again on the next step. On the lap step the car
     // centre is within one step's progress cap of the start line (the cross-section at startS).
@@ -258,6 +258,7 @@ describe('session: laps and result', () => {
     const gaps = [
       ...track.coins.map((c) => toLine(c.x, c.z) - TUNING.pickups.coinRadius),
       ...track.lightProps.map((p) => toLine(p.x, p.z) - p.r),
+      ...track.bombs.map((b) => toLine(b.x, b.z) - b.r),
     ];
     expect(gaps.length).toBeGreaterThan(0);
     expect(Math.min(...gaps)).toBeGreaterThan(reach);

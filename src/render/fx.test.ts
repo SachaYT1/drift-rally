@@ -187,6 +187,15 @@ describe('fx', () => {
     expect(live(scene, 'fx-bursts')).toBe(0);
   });
 
+  it('a bomb flashes, bursts sparks and rolls up smoke', () => {
+    const scene = new THREE.Scene();
+    const fx = createFx(scene);
+    fx.onEvent({ type: 'bomb', id: 'b', x: 1, z: 2 });
+    fx.update(makeDriver(0, 0, 'grip').state(), 'road', DT);
+    expect(live(scene, 'fx-bursts')).toBeGreaterThanOrEqual(30);
+    expect(live(scene, 'fx-smoke')).toBeGreaterThanOrEqual(8);
+  });
+
   it('reset clears marks, smoke and bursts', () => {
     const scene = new THREE.Scene();
     const fx = createFx(scene);

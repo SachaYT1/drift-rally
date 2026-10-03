@@ -17,7 +17,8 @@ import { TUNING } from '../shared/tuning';
 import { NEUTRAL_INPUT, type GameEvent, type InputFrame } from '../shared/types';
 import { wrapAngle } from '../shared/math';
 
-const track = buildTrack(PLAZA);
+// Handling only: the bombs sit on this very line (the point of them), so they are left out here.
+const track = buildTrack({ ...PLAZA, bombs: [] });
 const DT = 1 / TUNING.race.physicsHz;
 const D = TUNING.drift;
 const DEG = Math.PI / 180;

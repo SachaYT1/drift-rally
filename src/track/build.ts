@@ -1,5 +1,6 @@
 /** Builds runtime track geometry and queries from a TrackDef. Pure (uses three's math classes only). */
 import type {
+  BombSpot,
   Collider,
   CoinSpot,
   LightPropSpot,
@@ -51,6 +52,8 @@ export interface Track {
   collidersNear(x: number, z: number, radius: number): Collider[];
   coins: CoinSpot[];
   lightProps: LightPropSpot[];
+  /** Bombs, world positions; r = tuning.bomb.radius. */
+  bombs: BombSpot[];
   heavyPlacements: { def: HeavyObstacleDef; pose: Pose }[];
   decor: { def: DecorDef; x: number; z: number }[];
   /** Arc lengths of respawn markers (every progress.respawnSpacing m from startS). */
@@ -187,6 +190,11 @@ export function buildTrack(def: TrackDef, t: Tuning = TUNING): Track {
     return { id: l.id, kind: l.kind, x: p.x, z: p.z, r, heading: p.heading };
   });
 
+  const bombs: BombSpot[] = def.bombs.map((b) => {
+    const p = poseAt(b.s, b.lateral);
+    return { id: b.id, x: p.x, z: p.z, r: t.bomb.radius };
+  });
+
   const markerSpacing = t.progress.respawnSpacing;
   const respawnMarkers = Array.from({ length: Math.ceil(length / markerSpacing) }, (_, k) =>
     wrapLength(def.startS + k * markerSpacing, length),
@@ -216,6 +224,7 @@ export function buildTrack(def: TrackDef, t: Tuning = TUNING): Track {
     collidersNear: buildColliderGrid([...walls, ...heavyColliders]),
     coins,
     lightProps,
+    bombs,
     heavyPlacements: placed.map((p) => ({ def: p.def, pose: p.pose })),
     decor: def.decor.map((d: DecorDef) => ({ def: d, x: d.x - ox, z: d.z - oz })),
     respawnMarkers,
