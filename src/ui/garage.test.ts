@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SaveData } from '../shared/types';
+import { DEFAULT_SAVE } from '../core/save';
 import { TUNING } from '../shared/tuning';
 import { createGarageUI, type GarageUI } from './garage';
 import { enterGarage } from '../app/garageScreen';
@@ -9,7 +10,7 @@ import { click, fakeAnimations, installDom, keydown } from './domTestEnv';
 const win = await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium', muted: false, ghosts: true };
+const SAVE: SaveData = { ...DEFAULT_SAVE, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium' };
 
 const norm = (s: string | null): string => (s ?? '').replace(/\s+/g, ' ');
 

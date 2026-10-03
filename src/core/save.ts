@@ -1,5 +1,6 @@
 /** Versioned localStorage save. Never throws. See design spec §5 (Save). */
 import type { SaveData } from '../shared/types';
+import { CAR_IDS, DEFAULT_CAR, isCarId, type CarId } from '../shared/cars';
 import { isQualityLevel } from './quality';
 
 export const SAVE_KEY = 'driftRally.save.v1';
@@ -12,6 +13,9 @@ export const DEFAULT_SAVE: Readonly<SaveData> = Object.freeze({
   quality: null,
   muted: false,
   ghosts: true,
+  ownedCars: Object.freeze([DEFAULT_CAR]) as readonly CarId[],
+  selectedCar: DEFAULT_CAR,
+  bestScoreCar: null,
 });
 
 /**
@@ -69,6 +73,9 @@ export function writeSave(data: SaveData, storage?: Storage | null): boolean {
     quality: data.quality,
     muted: data.muted,
     ghosts: data.ghosts,
+    ownedCars: [...data.ownedCars],
+    selectedCar: data.selectedCar,
+    bestScoreCar: data.bestScoreCar,
   };
   try {
     store.setItem(SAVE_KEY, JSON.stringify(record));
@@ -107,6 +114,7 @@ function sanitize(parsed: unknown): SaveData {
   const coins = nonNegative(r.coins);
   const bestScore = nonNegative(r.bestScore);
   const bestLapMs = positive(r.bestLapMs);
+  const ownedCars = ownedCarsFrom(r.ownedCars);
   return {
     version: 1,
     coins: coins === null ? DEFAULT_SAVE.coins : Math.floor(coins),
@@ -115,7 +123,16 @@ function sanitize(parsed: unknown): SaveData {
     quality: isQualityLevel(r.quality) ? r.quality : DEFAULT_SAVE.quality,
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SAVE.muted,
     ghosts: typeof r.ghosts === 'boolean' ? r.ghosts : DEFAULT_SAVE.ghosts,
+    ownedCars,
+    selectedCar: isCarId(r.selectedCar) && ownedCars.includes(r.selectedCar) ? r.selectedCar : DEFAULT_CAR,
+    bestScoreCar: isCarId(r.bestScoreCar) ? r.bestScoreCar : DEFAULT_SAVE.bestScoreCar,
   };
+}
+
+/** Known car ids of a stored list, in line-up order, always with the free car; unknown or repeated ids drop out. */
+function ownedCarsFrom(v: unknown): CarId[] {
+  const stored: unknown[] = Array.isArray(v) ? v : [];
+  return CAR_IDS.filter((id) => id === DEFAULT_CAR || stored.includes(id));
 }
 
 function nonNegative(v: unknown): number | null {

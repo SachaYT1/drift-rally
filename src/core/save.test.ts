@@ -65,7 +65,7 @@ describe('save edge cases', () => {
     const withExtra = { ...data, debug: { huge: true } };
     expect(writeSave(withExtra, s)).toBe(true);
     expect(Object.keys(JSON.parse(s.getItem(SAVE_KEY) ?? '{}')).sort()).toEqual(
-      ['bestLapMs', 'bestScore', 'coins', 'ghosts', 'muted', 'quality', 'version'],
+      ['bestLapMs', 'bestScore', 'bestScoreCar', 'coins', 'ghosts', 'muted', 'ownedCars', 'quality', 'selectedCar', 'version'],
     );
   });
   it('write returns false without storage', () => expect(writeSave(data, null)).toBe(false));
@@ -159,5 +159,43 @@ describe('updateSave (read-modify-write)', () => {
       setItem() { throw new Error('SecurityError'); },
     } as unknown as Storage;
     expect(updateSave((cur) => ({ ...cur, coins: cur.coins + 2 }), fallback, blocked).save).toEqual({ ...fallback, coins: 42 });
+  });
+});
+
+describe('save: cars', () => {
+  const base = { version: 1, coins: 50, bestScore: 10, bestLapMs: null, quality: null, muted: false };
+
+  it('reads a save from before the line-up as «Искра» only', () => {
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify(base));
+    expect(loadSave(s)).toEqual({ ...DEFAULT_SAVE, coins: 50, bestScore: 10 });
+    expect(loadSave(s)).toMatchObject({ ownedCars: ['iskra'], selectedCar: 'iskra', bestScoreCar: null });
+  });
+
+  it('keeps known owned cars in line-up order, always with «Искра»', () => {
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['scarab', 'bmw', 'quadro', 'quadro'] }));
+    expect(loadSave(s).ownedCars).toEqual(['iskra', 'quadro', 'scarab']);
+  });
+
+  it('selects «Искра» when the stored car is unknown or not owned', () => {
+    for (const selectedCar of ['ronin', 'bmw', 7]) {
+      const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['quadro'], selectedCar }));
+      expect(loadSave(s).selectedCar).toBe('iskra');
+    }
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, ownedCars: ['quadro'], selectedCar: 'quadro' }));
+    expect(loadSave(s).selectedCar).toBe('quadro');
+  });
+
+  it('keeps a known record car and drops an unknown one', () => {
+    const s = mem(); s.setItem(SAVE_KEY, JSON.stringify({ ...base, bestScoreCar: 'ronin' }));
+    expect(loadSave(s).bestScoreCar).toBe('ronin');
+    s.setItem(SAVE_KEY, JSON.stringify({ ...base, bestScoreCar: 'bmw' }));
+    expect(loadSave(s).bestScoreCar).toBeNull();
+  });
+
+  it('round-trips the car fields', () => {
+    const s = mem();
+    const data = { ...DEFAULT_SAVE, coins: 3, ownedCars: ['iskra', 'ronin'] as const, selectedCar: 'ronin' as const, bestScoreCar: 'iskra' as const };
+    expect(writeSave(data, s)).toBe(true);
+    expect(loadSave(s)).toEqual(data);
   });
 });

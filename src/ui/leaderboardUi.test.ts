@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RaceResult, SaveData } from '../shared/types';
+import { DEFAULT_SAVE } from '../core/save';
 import type { Board, BoardLoad, LeaderboardPort, NickResult, NickStatus, Placement, Standing } from '../shared/leaderboard';
 import { createNickForm } from './nickForm';
 import { boardHtml } from './leaderboardView';
@@ -20,7 +21,7 @@ const RESULT: RaceResult = {
   coinsFromDrift: 1,
   coinsEarned: 4,
 };
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium', muted: false, ghosts: true };
+const SAVE: SaveData = { ...DEFAULT_SAVE, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium' };
 
 const standing = (nick: string, place = 3, total = 12): Standing => ({ nick, place, total, score: 1500, lapMs: 52000 });
 const norm = (s: string | null | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
