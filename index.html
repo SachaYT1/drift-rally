@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d0a0a" />
+    <meta name="description" content="Drift Rally — аркадный дрифт игрушечной машинки на огромной городской площади." />
+    <title>Drift Rally</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151111'/%3E%3Cg fill='%23F0573A' transform='skewX(-24) translate(12 0)'%3E%3Crect x='3' y='9' width='5' height='14'/%3E%3Crect x='11' y='9' width='5' height='14'/%3E%3Crect x='19' y='9' width='3' height='14'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <style>
+      /* Paint the dark background before the stylesheet and fonts arrive (no white flash). */
+      html, body { margin: 0; height: 100%; background: #0d0a0a; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <canvas id="game" tabindex="-1" aria-label="Drift Rally"></canvas>
+    <div id="ui"></div>
+    <noscript>
+      <p style="color:#f6f0ed;font-family:sans-serif;text-align:center;margin-top:40vh">
+        Для игры нужен JavaScript.
+      </p>
+    </noscript>
+    <script type="module" src="/src/app/main.ts"></script>
+  </body>
+</html>
