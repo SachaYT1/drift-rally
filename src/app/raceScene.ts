@@ -20,6 +20,7 @@ import { createFx, type Fx } from '../render/fx';
 import { createChaseCamera, type ChaseCamera } from '../render/chaseCamera';
 import { createCarModel, type CarModel } from '../render/carModel';
 import { applyPose } from '../render/bridge';
+import { separateInstancedShadowCasters } from '../render/shadowCasters';
 
 /** Paint reflection strength of the race car (integration notes). */
 const RACE_ENV_INTENSITY = 0.6;
@@ -77,6 +78,8 @@ export function createRaceScene(
   // Paint reflections from the garage PMREM; never scene.environment (it would light every Lambert surface).
   car.setEnvMap(envMap, RACE_ENV_INTENSITY);
   scene.add(car.root);
+  // Coins and props are instanced shadow casters: keep three's shared shadow depth program from flipping.
+  separateInstancedShadowCasters(scene);
 
   const camera = new THREE.PerspectiveCamera(TUNING.camera.fov, 16 / 9, TUNING.camera.near, TUNING.camera.far);
   const chase = createChaseCamera(camera);
