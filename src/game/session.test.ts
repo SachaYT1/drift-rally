@@ -38,6 +38,12 @@ function race(sess: Session, maxSeconds = 400) {
 }
 
 describe('session', () => {
+  it('runs with the given tuning (default TUNING) and reports it', () => {
+    expect(createSession(track).tuning).toBe(TUNING);
+    const tuning = { ...TUNING, car: { ...TUNING.car, maxSpeed: 38 } };
+    expect(createSession(track, { tuning }).tuning).toBe(tuning);
+  });
+
   it('counts down 3-2-1-0 once each and holds the car still', () => {
     const sess = createSession(track);
     const ev = runFor(sess, TUNING.race.countdown + 0.05, () => ({ ...NEUTRAL_INPUT, throttle: 1 }));

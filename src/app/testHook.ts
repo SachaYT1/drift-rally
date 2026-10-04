@@ -9,7 +9,8 @@ import { TUNING } from '../shared/tuning';
 import type { RacePhase } from '../game/session';
 import type { App, ScreenName } from './context';
 import type { RaceScreen } from './raceScreen';
-import type { InputSource } from './raceRun';
+import type { InputSource, RaceRun } from './raceRun';
+import type { CarId } from '../shared/cars';
 import { createAutopilot } from '../game/autopilot';
 import { livePoints } from '../game/bots';
 
@@ -34,6 +35,10 @@ export interface GameTestState {
   /** Race time, s. */
   time: number;
   paused: boolean;
+  /** The car of the running race. */
+  car: CarId | null;
+  /** Top speed of the running race's physics (the car's own tuning), m/s. */
+  maxSpeed: number | null;
   fps?: number;
   /**
    * Ghost bots of the run in roster order, points as the HUD ranks them (banked plus the running chain: the
@@ -84,7 +89,7 @@ function nextFrame(): Promise<void> {
 }
 
 export function installTestHook(target: HookTarget): GameTestHook {
-  let autopilot: InputSource | null = null;
+  let autopilot: { run: RaceRun; source: InputSource } | null = null;
 
   function app(): App {
     const a = target.app();
@@ -92,12 +97,14 @@ export function installTestHook(target: HookTarget): GameTestHook {
     return a;
   }
 
+  /** The autopilot of the running race, driving with that race's car physics. */
   function drive(): InputSource {
-    autopilot ??= createAutopilot(app().track);
-    return autopilot;
+    const r = run();
+    if (autopilot?.run !== r) autopilot = { run: r, source: createAutopilot(app().track, r.tuning) };
+    return autopilot.source;
   }
 
-  function run() {
+  function run(): RaceRun {
     const r = target.race()?.run;
     if (!r) throw new Error(`__game: no race running (screen: ${target.app()?.screen ?? 'loading'})`);
     return r;
@@ -145,6 +152,8 @@ export function installTestHook(target: HookTarget): GameTestHook {
         mode: st?.car.mode ?? null,
         time: st?.time ?? 0,
         paused: r?.paused ?? false,
+        car: r?.car ?? null,
+        maxSpeed: r?.session.tuning.car.maxSpeed ?? null,
         fps: a?.fps,
         bots: (r?.ghosts?.field.bots ?? []).map((b) => {
           const bs = b.session.state();

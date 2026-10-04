@@ -11,7 +11,8 @@
  */
 import type { InputFrame, RaceResult } from '../shared/types';
 import type { Placement } from '../shared/leaderboard';
-import { TUNING } from '../shared/tuning';
+import { TUNING, type Tuning } from '../shared/tuning';
+import { tuningFor, type CarId } from '../shared/cars';
 import { createSession, type Session, type SessionState } from '../game/session';
 import { createFixedLoop } from '../core/loop';
 import { createHud } from '../ui/hud';
@@ -43,6 +44,10 @@ export interface RaceRun {
   readonly session: Session;
   /** The ghost bots of this run; null: switched off in the garage. */
   readonly ghosts: GhostRun | null;
+  /** The car of this run. */
+  readonly car: CarId;
+  /** The physics of this run: TUNING with the car's overrides (the session's own tuning). */
+  readonly tuning: Tuning;
   readonly paused: boolean;
   /** The session reported its finish (results may still be pending). */
   readonly finished: boolean;
@@ -64,9 +69,11 @@ const RESULTS_DELAY_MS = 1400;
 const HUD_INTERVAL = 1 / 30;
 const STEP_DT = 1 / TUNING.race.physicsHz;
 
-export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: InputSource | null): RaceRun {
+/** One race in `car` (the garage hands over the car on its podium, not whatever the save selects by then). */
+export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: InputSource | null, car: CarId): RaceRun {
   const { race, audio, input, ui } = app;
-  const session = createSession(app.track, { bestLap: bestLapSeconds(app.save) });
+  const tuning = tuningFor(car);
+  const session = createSession(app.track, { bestLap: bestLapSeconds(app.save), tuning });
   // The garage switch is read once per run: toggling it applies from the next race.
   const ghosts = app.save.ghosts ? createGhostRun(app.track) : null;
   let source = initialSource;
@@ -101,8 +108,9 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   };
   const hudView = hudViewOf(session.state());
 
+  race.setCar(car);
   race.reset();
-  const hud = createHud(ui, { onPause: () => pause('player') });
+  const hud = createHud(ui, { onPause: () => pause('player'), maxSpeed: tuning.car.maxSpeed });
   const pauseMenu = createPauseMenu(ui, {
     onResume: () => resume(),
     onRestart: () => hooks.onRestart(),
@@ -190,7 +198,7 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
     finished = true;
     // Saved once, at the finish; quitting earlier forfeits (design spec §2.5). Applied to the save as stored
     // now: another tab may have raced since this one loaded, and its coins and records must survive.
-    outcome = { result, save: recordRaceResult(app, result) };
+    outcome = { result, save: recordRaceResult(app, result, car) };
     // Sent while the «Финиш!» toast plays; the results screen shows the place when it arrives.
     placement = app.leaderboard?.recordFinish() ?? null;
     // Every bot's final points for the HUD and the results; the ghosts fade out where they are.
@@ -290,6 +298,10 @@ export function startRaceRun(app: App, hooks: RaceRunHooks, initialSource: Input
   return {
     session,
     ghosts,
+    car,
+    get tuning() {
+      return session.tuning;
+    },
     get paused() {
       return paused;
     },

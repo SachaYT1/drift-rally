@@ -6,7 +6,9 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createCarModel, type CarModel } from './carModel';
+import type { CarModel } from './carModel';
+import { createCarRack } from './carRack';
+import type { CarId } from '../shared/cars';
 
 export interface GarageScene {
   scene: THREE.Scene;
@@ -14,8 +16,10 @@ export interface GarageScene {
   /** Car slowly rotates on the podium. `time` in seconds drives the rotation (deterministic). */
   update(dt: number, time: number): void;
   resize(width: number, height: number): void;
-  /** The car on the podium (e.g. to mirror the chosen paint). */
+  /** The car on the podium. */
   readonly car: CarModel;
+  /** Show this car of the line-up on the podium. */
+  setCar(id: CarId): void;
   /**
    * RoomEnvironment PMREM used for the paint reflections (applied with `car.setEnvMap`). Owned by the
    * garage and never disposed. The race scene should reuse it via `raceCar.setEnvMap(garage.envMap)`, NOT
@@ -281,10 +285,10 @@ export function createGarageScene(renderer: THREE.WebGLRenderer): GarageScene {
   inner.rotation.x = Math.PI / 2;
   inner.position.y = PODIUM_TOP;
   turntable.add(top, inner);
-  const car = createCarModel();
-  car.setEnvMap(envMap);
-  car.root.position.y = PODIUM_TOP;
-  turntable.add(car.root);
+  const rack = createCarRack(turntable, (car) => {
+    car.setEnvMap(envMap);
+    car.root.position.y = PODIUM_TOP;
+  });
   turntable.rotation.y = START_YAW;
   scene.add(turntable);
 
@@ -296,7 +300,12 @@ export function createGarageScene(renderer: THREE.WebGLRenderer): GarageScene {
   return {
     scene,
     camera,
-    car,
+    get car() {
+      return rack.current;
+    },
+    setCar(id: CarId): void {
+      rack.show(id);
+    },
     envMap,
     update(_dt: number, time: number): void {
       turntable.rotation.y = START_YAW + time * SPIN_RATE;

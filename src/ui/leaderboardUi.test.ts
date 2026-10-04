@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RaceResult, SaveData } from '../shared/types';
+import { DEFAULT_SAVE } from '../core/save';
 import type { Board, BoardLoad, LeaderboardPort, NickResult, NickStatus, Placement, Standing } from '../shared/leaderboard';
 import { createNickForm } from './nickForm';
 import { boardHtml } from './leaderboardView';
@@ -20,7 +21,7 @@ const RESULT: RaceResult = {
   coinsFromDrift: 1,
   coinsEarned: 4,
 };
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium', muted: false, ghosts: true };
+const SAVE: SaveData = { ...DEFAULT_SAVE, coins: 120, bestScore: 1500, bestLapMs: 52_000, quality: 'medium' };
 
 const standing = (nick: string, place = 3, total = 12): Standing => ({ nick, place, total, score: 1500, lapMs: 52000 });
 const norm = (s: string | null | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
@@ -159,6 +160,13 @@ describe('friends table markup', () => {
     expect(rows[3].classList.contains('is-me')).toBe(true);
     expect(el.querySelector('tbody b')).toBeNull();
     expect(norm(el.querySelector('.dr-note')!.textContent)).toBe('Игроков в таблице: 40');
+  });
+
+  it('names the car of each record under the nick, when known', () => {
+    const el = document.createElement('div');
+    el.innerHTML = boardHtml({ top: [{ place: 1, nick: 'Петя', score: 3000, lapMs: 50000, car: 'ronin' }, board.top[1]], me: null, total: 2 }, null);
+    const cars = [...el.querySelectorAll('tbody tr')].map((r) => r.querySelector('.dr-board__nick .dr-board__car')?.textContent ?? null);
+    expect(cars).toEqual(['Ронин', null]);
   });
 
   it('highlights the player inside the top without a second row', () => {

@@ -1,5 +1,5 @@
 /**
- * Procedural low-poly car «Искра» (open-top toy buggy from the user's garage reference).
+ * Procedural low-poly car rig: one body from render/bodies/* (built with carParts.ts) on four animated wheels.
  *
  * Model space: built facing +Z, local +X = LEFT side, origin at ground centre (see bridge.ts).
  * Hierarchy: root -> body (pivot at axle height; roll/pitch) -> merged body parts,
@@ -7,11 +7,11 @@
  * Parts are merged per material: 3 body meshes + 4 wheel meshes (7 draw calls).
  */
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CarState } from '../shared/types';
 import { TUNING } from '../shared/tuning';
 import { TAU, clamp, damp } from '../shared/math';
+import { CAP_OUT, PartBuilder, WHEEL_WIDTH, createMaterials, createWheelGeometry, type CarBody } from './carParts';
+import { ISKRA } from './bodies/iskra';
 
 export interface CarModel {
   /** Built facing +Z, origin at ground centre. Pose it with bridge.applyPose(). */
@@ -42,14 +42,10 @@ export interface CarModel {
   reset(): void;
 }
 
-export const DEFAULT_CAR_COLOR = 0xf0573a;
 /** Default paint reflection strength for setEnvMap(). */
 export const DEFAULT_ENV_INTENSITY = 0.35;
 
 // ---- Visual-only constants (not gameplay tuning) ----
-const WHEEL_WIDTH = 0.35;
-/** Hub disc + cap protrude this far beyond the tyre's outer face; the car width includes them. */
-const CAP_OUT = 0.045;
 /** Front wheel angle in grip mode is divided by (1 + |vf| * STEER_SPEED_SOFTEN / steerSpeedRef). */
 const STEER_SPEED_SOFTEN = 0.5;
 /** While drifting the front wheels counter-steer toward the velocity: angle = -slip * gain + steer share. */
@@ -76,156 +72,10 @@ const SPRING_SUBSTEP = 1 / 120;
 const HOP_SPEED = 4.4;
 const HOP_GRAVITY = 20;
 
-/** Part colours (sRGB hex; converted to linear vertex colours via Color.setHex). */
-const COLORS = {
-  dark: 0x1c1a1c,
-  seat: 0x2e2a2c,
-  metal: 0x4a4b50,
-  frame: 0xc4c8cc,
-  glass: 0x1f3a39,
-  headlight: 0xfff6e2,
-  taillight: 0xff2b24,
-  tyre: 0x1e1e21,
-  hub: 0xb4aea6,
-  cap: DEFAULT_CAR_COLOR,
-} as const;
-
-interface Materials {
-  paint: THREE.MeshStandardMaterial;
-  /** Every other body part: one vertex-coloured Lambert mesh (one draw call). */
-  trim: THREE.MeshLambertMaterial;
-  /** Head/tail lights: unlit so they read as emissive (no real lights). */
-  lamps: THREE.MeshBasicMaterial;
-  /** Tyre + hub + cap, flat-shaded so the low-poly facets show the wheel spin. */
-  wheel: THREE.MeshLambertMaterial;
-}
-
-function createMaterials(color: number): Materials {
-  return {
-    paint: new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0 }),
-    trim: new THREE.MeshLambertMaterial({ vertexColors: true }),
-    lamps: new THREE.MeshBasicMaterial({ vertexColors: true }),
-    wheel: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-  };
-}
-
-/** Collects transformed part geometries per material and merges them into one geometry each. */
-class PartBuilder {
-  private readonly parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  private readonly m = new THREE.Matrix4();
-  private readonly q = new THREE.Quaternion();
-  private readonly e = new THREE.Euler();
-  private readonly p = new THREE.Vector3();
-  private readonly s = new THREE.Vector3(1, 1, 1);
-  private readonly c = new THREE.Color();
-
-  /** `color` fills a vertex-colour attribute (for vertexColors materials); null for plain materials. */
-  add(mat: THREE.Material, geo: THREE.BufferGeometry, color: number | null, x: number, y: number, z: number, rx = 0, rz = 0): void {
-    this.q.setFromEuler(this.e.set(rx, 0, rz));
-    this.m.compose(this.p.set(x, y, z), this.q, this.s);
-    geo.applyMatrix4(this.m);
-    // RoundedBoxGeometry is non-indexed; mergeGeometries needs all parts in the same form.
-    const flat = geo.index ? geo.toNonIndexed() : geo;
-    if (flat !== geo) geo.dispose();
-    if (color !== null) {
-      this.c.setHex(color);
-      const n = flat.getAttribute('position').count;
-      const rgb = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        rgb[i * 3] = this.c.r;
-        rgb[i * 3 + 1] = this.c.g;
-        rgb[i * 3 + 2] = this.c.b;
-      }
-      flat.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
-    }
-    const list = this.parts.get(mat) ?? [];
-    list.push(flat);
-    this.parts.set(mat, list);
-  }
-
-  box(mat: THREE.Material, color: number | null, w: number, h: number, d: number, x: number, y: number, z: number, rx = 0): void {
-    this.add(mat, new THREE.BoxGeometry(w, h, d), color, x, y, z, rx);
-  }
-
-  rounded(
-    mat: THREE.Material, color: number | null,
-    w: number, h: number, d: number, r: number, x: number, y: number, z: number, rx = 0,
-  ): void {
-    this.add(mat, new RoundedBoxGeometry(w, h, d, 3, r), color, x, y, z, rx);
-  }
-
-  /** Merge (and forget) everything collected for `mat`. */
-  merged(mat: THREE.Material): THREE.BufferGeometry {
-    const geos = this.parts.get(mat) ?? [];
-    this.parts.delete(mat);
-    const merged = mergeGeometries(geos, false);
-    for (const g of geos) g.dispose();
-    if (!merged) throw new Error('carModel: failed to merge part geometries');
-    return merged;
-  }
-
-  /** One mesh per material. */
-  build(target: THREE.Object3D): void {
-    for (const mat of [...this.parts.keys()]) target.add(new THREE.Mesh(this.merged(mat), mat));
-  }
-}
-
-/** Body parts in model space (y up from the ground, +Z forward, +X left). */
-function buildBody(mats: Materials, target: THREE.Object3D): void {
-  const L = TUNING.car.length;
-  const { paint, trim, lamps } = mats;
-  const b = new PartBuilder();
-  // Paint: thick rounded slab, raised hood and rear deck, side rails around the open cockpit.
-  b.rounded(paint, null, 1.72, 0.46, L, 0.15, 0, 0.63, 0);
-  b.rounded(paint, null, 1.62, 0.16, 1.62, 0.07, 0, 0.86, 1.13);
-  b.rounded(paint, null, 1.62, 0.13, 0.86, 0.06, 0, 0.84, -1.52);
-  for (const sx of [0.78, -0.78]) b.rounded(paint, null, 0.16, 0.12, 1.46, 0.05, sx, 0.88, -0.38);
-  // Underbody, headrest pad, front grille; seats sit on the painted cockpit deck.
-  b.box(trim, COLORS.dark, 1.1, 0.24, 3.3, 0, 0.3, 0);
-  b.rounded(trim, COLORS.dark, 1.12, 0.2, 0.24, 0.07, 0, 1.38, -0.98);
-  b.box(trim, COLORS.dark, 0.66, 0.1, 0.04, 0, 0.66, L / 2 + 0.005);
-  for (const sx of [0.4, -0.4]) {
-    b.rounded(trim, COLORS.seat, 0.56, 0.12, 0.52, 0.04, sx, 0.92, -0.36);
-    b.rounded(trim, COLORS.seat, 0.56, 0.44, 0.14, 0.05, sx, 1.1, -0.66, -0.18);
-  }
-  // Roll bar behind the seats.
-  for (const sx of [0.58, -0.58]) b.box(trim, COLORS.metal, 0.07, 0.5, 0.07, sx, 1.1, -0.98);
-  b.box(trim, COLORS.metal, 1.23, 0.07, 0.07, 0, 1.34, -0.98);
-  // Windshield: silver frame + dark glass, raked back, standing on the hood's rear edge.
-  const wsZ = 0.38;
-  const wsTilt = -0.38;
-  const wsH = 0.5;
-  const cy = 0.9 + (wsH / 2) * Math.cos(wsTilt);
-  const cz = wsZ + (wsH / 2) * Math.sin(wsTilt);
-  b.box(trim, COLORS.glass, 1.26, wsH - 0.08, 0.03, 0, cy, cz, wsTilt);
-  for (const sx of [0.66, -0.66]) b.box(trim, COLORS.frame, 0.07, wsH, 0.06, sx, cy, cz, wsTilt);
-  const topY = 0.9 + wsH * Math.cos(wsTilt);
-  const topZ = wsZ + wsH * Math.sin(wsTilt);
-  b.box(trim, COLORS.frame, 1.39, 0.07, 0.06, 0, topY, topZ, wsTilt);
-  b.box(trim, COLORS.frame, 1.39, 0.06, 0.08, 0, 0.92, wsZ, wsTilt);
-  // White headlights on the nose, red tail lights on the tail.
-  for (const sx of [0.56, -0.56]) {
-    b.box(lamps, COLORS.headlight, 0.34, 0.12, 0.04, sx, 0.66, L / 2 + 0.005);
-    b.box(lamps, COLORS.taillight, 0.3, 0.1, 0.04, sx, 0.66, -L / 2 - 0.005);
-  }
-  b.build(target);
-}
-
 interface Wheel {
   pivot: THREE.Group;
   spin: THREE.Group;
   front: boolean;
-}
-
-/** Tyre + hub disc + cap as one geometry, axle along X; hub and cap on the `outward` (+1/-1) face. */
-function createWheelGeometry(mat: THREE.Material, outward: number): THREE.BufferGeometry {
-  const r = TUNING.car.wheelRadius;
-  const axle = Math.PI / 2;
-  const b = new PartBuilder();
-  b.add(mat, new THREE.CylinderGeometry(r, r, WHEEL_WIDTH, 16), COLORS.tyre, 0, 0, 0, 0, axle);
-  b.add(mat, new THREE.CylinderGeometry(r * 0.6, r * 0.6, 0.03, 16), COLORS.hub, outward * (WHEEL_WIDTH / 2 + 0.01), 0, 0, 0, axle);
-  b.add(mat, new THREE.CylinderGeometry(r * 0.26, r * 0.26, CAP_OUT * 2, 8), COLORS.cap, outward * (WHEEL_WIDTH / 2), 0, 0, 0, axle);
-  return b.merged(mat);
 }
 
 function createWheel(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, z: number, front: boolean, name: string): Wheel {
@@ -255,7 +105,8 @@ function stepSpring(s: Spring, target: number, dt: number): void {
   }
 }
 
-export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
+/** A car model of `carBody`, painted `color` (default: the body's own paint). */
+export function createCarModel(carBody: CarBody = ISKRA, color: number = carBody.paint): CarModel {
   const mats = createMaterials(color);
   const root = new THREE.Group();
   root.name = 'car';
@@ -268,11 +119,13 @@ export function createCarModel(color: number = DEFAULT_CAR_COLOR): CarModel {
   const bodyContent = new THREE.Group();
   bodyContent.position.y = -r;
   body.add(bodyContent);
-  buildBody(mats, bodyContent);
+  const parts = new PartBuilder();
+  carBody.build(parts, mats);
+  parts.build(bodyContent);
 
   // Left (+X) and right wheels share one geometry per side.
-  const leftGeo = createWheelGeometry(mats.wheel, 1);
-  const rightGeo = createWheelGeometry(mats.wheel, -1);
+  const leftGeo = createWheelGeometry(mats.wheel, 1, carBody.wheel);
+  const rightGeo = createWheelGeometry(mats.wheel, -1, carBody.wheel);
   const wx = TUNING.car.width / 2 - WHEEL_WIDTH / 2 - CAP_OUT;
   const wz = TUNING.car.wheelBase / 2;
   const wheels: Wheel[] = [

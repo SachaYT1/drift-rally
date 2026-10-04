@@ -21,6 +21,7 @@ import { enterGarage, type GarageScreen } from './garageScreen';
 import { enterRace, type RaceScreen } from './raceScreen';
 import { installTestHook } from './testHook';
 import { createLeaderboard } from './leaderboard';
+import { isCarId, type CarId } from '../shared/cars';
 
 declare global {
   interface Window {
@@ -52,6 +53,10 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // `?test`: render contract (low, pixel ratio 1, <= 640x360) unless `&full` / `&quality=` opt out.
   const { test, quality: forced } = testFlagsFrom(params);
+  // `?test&car=<id>`: the first garage opens on that car (screenshots of every body). Opening it changes nothing
+  // in the save; buying and racing work as usual.
+  const carParam = params.get('car');
+  let previewCar: CarId | null = test.enabled && isCarId(carParam) ? carParam : null;
   const canvas = byId<HTMLCanvasElement>('game');
   const ui = byId('ui');
 
@@ -66,16 +71,17 @@ async function boot(): Promise<void> {
   function goGarage(): void {
     if (!app || halted) return;
     raceScreen = null;
-    garageScreen = enterGarage(app, { lastShown: lastShownSave, onStart: goRace });
+    garageScreen = enterGarage(app, { lastShown: lastShownSave, onStart: goRace, previewCar });
+    previewCar = null;
     lastShownSave = app.save;
   }
 
-  function goRace(): void {
+  function goRace(car: CarId): void {
     if (!app || halted) return;
     const input = app.input;
     garageScreen = null;
     // Test mode: the hook steps the simulation; rAF only renders until __game.realtime() says otherwise.
-    raceScreen = enterRace(app, { source: test.enabled ? null : () => input.sample(), onGarage: goGarage });
+    raceScreen = enterRace(app, { car, source: test.enabled ? null : () => input.sample(), onGarage: goGarage });
   }
 
   if (test.enabled) {

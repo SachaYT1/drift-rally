@@ -18,6 +18,7 @@ import { clamp } from '../shared/math';
 import { formatPoints } from '../ui/format';
 import { applyPose } from './bridge';
 import { createCarModel, type CarModel } from './carModel';
+import { ISKRA } from './bodies/iskra';
 
 /** Ghost opacity away from the player's car. */
 export const GHOST_OPACITY = 0.45;
@@ -254,7 +255,7 @@ export function createGhostLayer(): GhostLayer {
         dispose(g);
       }
       ghosts = defs.map((d) => {
-        const model = createCarModel(d.color);
+        const model = createCarModel(ISKRA, d.color);
         const { colourMats, meshes } = ghostify(model, depthMat);
         const root = new THREE.Group();
         root.name = `ghost-${d.name}`;
