@@ -44,6 +44,8 @@ export interface SessionState {
 
 export interface Session {
   readonly track: Track;
+  /** The physics this race runs with (opts.tuning, default TUNING). */
+  readonly tuning: Tuning;
   state(): Readonly<SessionState>;
   /** Advance one fixed step. `respawn` is an edge action. */
   step(input: InputFrame, actions: { respawn: boolean }, dt: number): GameEvent[];
@@ -94,6 +96,7 @@ export function createSession(
 
   return {
     track,
+    tuning: t,
     state: () => state,
     step(input, actions, dt) {
       // Finished races are frozen; a non-positive (or NaN) step is a pause and changes nothing.

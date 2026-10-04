@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SaveData } from '../shared/types';
+import { DEFAULT_SAVE } from '../core/save';
 import { TUNING } from '../shared/tuning';
+import { CARS, type CarId } from '../shared/cars';
 import { createGarageUI, type GarageUI } from './garage';
 import { enterGarage } from '../app/garageScreen';
 import type { App } from '../app/context';
@@ -9,7 +11,7 @@ import { click, fakeAnimations, installDom, keydown } from './domTestEnv';
 const win = await installDom();
 afterAll(() => vi.unstubAllGlobals());
 
-const SAVE: SaveData = { version: 1, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium', muted: false, ghosts: true };
+const SAVE: SaveData = { ...DEFAULT_SAVE, coins: 120, bestScore: 4200, bestLapMs: 61_000, quality: 'medium' };
 
 const norm = (s: string | null): string => (s ?? '').replace(/\s+/g, ' ');
 
@@ -187,6 +189,121 @@ describe('garage UI (jsdom)', () => {
       expect(onMute).not.toHaveBeenCalled();
     });
   });
+
+  describe('car line-up', () => {
+    let onStart: ReturnType<typeof vi.fn<(car: CarId) => void>>;
+    let onBrowse: ReturnType<typeof vi.fn<(id: CarId) => void>>;
+    let onBuy: ReturnType<typeof vi.fn<(id: CarId) => boolean>>;
+
+    function mountCars(save: SaveData = SAVE, initialCar?: CarId): void {
+      onStart = vi.fn<(car: CarId) => void>();
+      onBrowse = vi.fn<(id: CarId) => void>();
+      onBuy = vi.fn<(id: CarId) => boolean>((id) => {
+        // What garageScreen does: the purchase comes back as a new save.
+        ui.update({ ...save, coins: save.coins - CARS[id].price, ownedCars: [...save.ownedCars, id], selectedCar: id });
+        return true;
+      });
+      ui = createGarageUI(root, { save, trackName: 'Площадь', onStart, onMute: () => {}, onGhosts: () => {}, initialCar, onBrowse, onBuy });
+    }
+    const cta = (): HTMLButtonElement => q<HTMLButtonElement>('.dr-cta');
+
+    it('opens on the selected car and steps through the line-up with ← →, wrapping around', () => {
+      mountCars({ ...SAVE, ownedCars: ['iskra', 'ronin'], selectedCar: 'ronin' });
+      expect(q('.dr-car__name').textContent).toBe('Ронин');
+      expect(q('.dr-car__count').textContent).toBe('Машина 3/4');
+      keydown('ArrowRight');
+      expect(q('.dr-car__name').textContent).toBe('Скарабей');
+      keydown('ArrowRight');
+      expect(q('.dr-car__name').textContent).toBe('Искра');
+      keydown('ArrowLeft');
+      expect(onBrowse.mock.calls.map(([id]) => id)).toEqual(['scarab', 'iskra', 'scarab']);
+    });
+
+    it('steps with the ‹ › buttons too', () => {
+      mountCars();
+      click(q('.dr-carnav__btn[data-step="1"]'));
+      expect(q('.dr-car__name').textContent).toBe('Квадро');
+      click(q('.dr-carnav__btn[data-step="-1"]'));
+      expect(q('.dr-car__name').textContent).toBe('Искра');
+    });
+
+    it('shows a locked car with its price, and Enter does not start a race in it', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      expect(q('.dr-car__lock').textContent).toBe('Не куплена');
+      expect(cta().classList.contains('dr-cta--buy')).toBe(true);
+      expect(norm(cta().textContent)).toContain('Купить');
+      expect(norm(cta().textContent)).toContain('300');
+      keydown('Enter');
+      expect(onStart).not.toHaveBeenCalled();
+      keydown('ArrowLeft');
+      keydown('Enter');
+      expect(onStart).toHaveBeenCalledTimes(1);
+      expect(onStart).toHaveBeenCalledWith('iskra');
+    });
+
+    it('starts the race in the car on the card', () => {
+      mountCars({ ...SAVE, ownedCars: ['iskra', 'quadro'] });
+      keydown('ArrowRight');
+      click(cta());
+      expect(onStart).toHaveBeenCalledWith('quadro');
+    });
+
+    it('disables «Купить» and tells how many coins are missing', () => {
+      mountCars({ ...SAVE, coins: 120 });
+      keydown('ArrowRight');
+      expect(cta().disabled).toBe(true);
+      expect(norm(q('.dr-cta-hint').textContent)).toContain('Не хватает');
+      expect(norm(q('.dr-cta-hint').textContent)).toContain('180 монет');
+    });
+
+    it('buys only after the confirmation; «Отмена» buys nothing', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      click(cta());
+      expect(norm(q('.dr-modal__title').textContent)).toBe('Купить «Квадро»?');
+      click(q('[data-ref="cancel"]'));
+      expect(root.querySelector('.dr-modal')).toBeNull();
+      expect(onBuy).not.toHaveBeenCalled();
+
+      click(cta());
+      click(q('[data-confirm-buy]'));
+      expect(onBuy).toHaveBeenCalledWith('quadro');
+      expect(root.querySelector('.dr-modal')).toBeNull();
+      expect(q('.dr-car__lock').textContent).toBe('');
+      expect(cta().classList.contains('dr-cta--buy')).toBe(false);
+      expect(norm(cta().textContent)).toContain('В заезд');
+    });
+
+    it('focuses «Отмена» in the buy dialog, so Enter there cancels', () => {
+      mountCars({ ...SAVE, coins: 500 });
+      keydown('ArrowRight');
+      click(cta(), 0);
+      expect(document.activeElement).toBe(q('[data-ref="cancel"]'));
+    });
+
+    it('keeps the buy dialog in step with the wallet while it is open', () => {
+      const save: SaveData = { ...SAVE, coins: 500 };
+      mountCars(save);
+      keydown('ArrowRight');
+      click(cta());
+      const confirm = (): HTMLButtonElement => q<HTMLButtonElement>('[data-confirm-buy]');
+      expect(norm(q('.dr-buy__text').textContent)).toContain('останется 200');
+      ui.update({ ...save, coins: 350 }); // another tab spent some coins
+      expect(norm(q('.dr-buy__text').textContent)).toContain('останется 50');
+      expect(confirm().disabled).toBe(false);
+      ui.update({ ...save, coins: 100 });
+      expect(norm(q('.dr-buy__text').textContent)).toContain('Не хватает 200 монет');
+      expect(confirm().disabled).toBe(true);
+      ui.update({ ...save, coins: 100, ownedCars: ['iskra', 'quadro'] }); // bought in another tab
+      expect(root.querySelector('.dr-modal')).toBeNull();
+    });
+
+    it('opens on `initialCar` when given (test preview)', () => {
+      mountCars(SAVE, 'scarab');
+      expect(q('.dr-car__name').textContent).toBe('Скарабей');
+    });
+  });
 });
 
 describe('enterGarage mute wiring (jsdom)', () => {
@@ -202,7 +319,7 @@ describe('enterGarage mute wiring (jsdom)', () => {
     });
     const app = {
       ui: root,
-      garage: { scene: {}, camera: {}, update: () => {} },
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: () => {} },
       renderer: { render: () => {} },
       track: { def: { name: 'Площадь' } },
       input: { setRacing: () => {} },
@@ -225,6 +342,75 @@ describe('enterGarage mute wiring (jsdom)', () => {
     click(root.querySelector('.dr-ghosts')!);
     expect(setGhosts).toHaveBeenLastCalledWith(false);
     screen.destroy();
+    root.remove();
+  });
+});
+
+describe('enterGarage line-up wiring (jsdom)', () => {
+  it('shows the browsed car on the podium and selects it when owned', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let save: SaveData = { ...SAVE, ownedCars: ['iskra', 'ronin'] };
+    const shown: string[] = [];
+    const selected: string[] = [];
+    const app = {
+      ui: root,
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: (id: string) => shown.push(id) },
+      renderer: { render: () => {} },
+      track: { def: { name: 'Площадь' } },
+      input: { setRacing: () => {} },
+      audio: { setEngineActive: () => {}, unlock: () => Promise.resolve() },
+      get save() {
+        return save;
+      },
+      updateSave: (change: (s: SaveData) => SaveData) => {
+        save = change(save);
+        selected.push(save.selectedCar);
+        return save;
+      },
+      setMuted: () => {},
+      onSaveChanged: () => () => {},
+      screen: 'loading',
+      redraw: null,
+      frameDone: () => {},
+    } as unknown as App;
+    const screen = enterGarage(app, { lastShown: null, onStart: () => {} });
+    expect(shown).toEqual(['iskra']);
+    keydown('ArrowRight'); // Квадро: not owned
+    keydown('ArrowRight'); // Ронин: owned
+    expect(shown).toEqual(['iskra', 'quadro', 'ronin']);
+    expect(selected).toEqual(['ronin']);
+    screen.destroy();
+    root.remove();
+  });
+
+  it('races the car on the podium even when another tab selected another one meanwhile', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let save: SaveData = { ...SAVE, ownedCars: ['iskra', 'quadro', 'ronin'], selectedCar: 'quadro' };
+    const app = {
+      ui: root,
+      garage: { scene: {}, camera: {}, update: () => {}, setCar: () => {} },
+      renderer: { render: () => {} },
+      track: { def: { name: 'Площадь' } },
+      input: { setRacing: () => {} },
+      audio: { setEngineActive: () => {}, unlock: () => Promise.resolve() },
+      get save() {
+        return save;
+      },
+      updateSave: (change: (s: SaveData) => SaveData) => (save = change(save)),
+      setMuted: () => {},
+      onSaveChanged: () => () => {},
+      screen: 'loading',
+      redraw: null,
+      frameDone: () => {},
+    } as unknown as App;
+    const onStart = vi.fn<(car: CarId) => void>();
+    enterGarage(app, { lastShown: null, onStart });
+    save = { ...save, selectedCar: 'ronin' }; // another tab browsed to «Ронин»
+    keydown('Enter');
+    expect(onStart).toHaveBeenCalledWith('quadro');
+    expect(save.selectedCar).toBe('quadro');
     root.remove();
   });
 });

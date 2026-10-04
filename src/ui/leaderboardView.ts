@@ -2,6 +2,7 @@
  * Friends table inside the garage records modal: top rows with the player's row highlighted (appended below
  * the top when they rank lower), the player's nick with «Сменить ник», or the field to join.
  */
+import { CARS } from '../shared/cars';
 import { sameNick, type Board, type BoardRow, type LeaderboardPort } from '../shared/leaderboard';
 import { formatPoints, formatTime } from './format';
 import { createNickForm, type NickForm } from './nickForm';
@@ -15,7 +16,7 @@ function rowHtml(r: BoardRow, me: boolean): string {
   const lap = r.lapMs === null ? '—' : formatTime(r.lapMs / 1000);
   return `<tr class="${me ? 'is-me' : ''}"${me ? ' aria-current="true"' : ''}>
       <td class="dr-board__place dr-num">${r.place}</td>
-      <td class="dr-board__nick">${escapeHtml(r.nick)}</td>
+      <td class="dr-board__nick">${escapeHtml(r.nick)}${r.car ? `<span class="dr-board__car">${escapeHtml(CARS[r.car].name)}</span>` : ''}</td>
       <td class="dr-num">${formatPoints(r.score)}</td>
       <td class="dr-num">${lap}</td>
     </tr>`;

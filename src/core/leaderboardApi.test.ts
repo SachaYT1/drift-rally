@@ -54,7 +54,7 @@ describe('leaderboard api: board', () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      `${URL_BASE}/rest/v1/leaderboard_ranked?select=place,nick,best_score,best_lap_ms&order=place.asc,nick.asc&limit=${BOARD_SIZE}`,
+      `${URL_BASE}/rest/v1/leaderboard_ranked?select=place,nick,best_score,best_lap_ms,best_car&order=place.asc,nick.asc&limit=${BOARD_SIZE}`,
     );
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.apikey).toBe(KEY);
@@ -71,7 +71,7 @@ describe('leaderboard api: board', () => {
     expect(r.ok && r.value.me).toEqual({ place: 37, nick: 'Вася', score: 120, lapMs: 70000 });
     expect(r.ok && r.value.total).toBe(42);
     expect(calls[1].url).toBe(
-      `${URL_BASE}/rest/v1/leaderboard_ranked?select=place,nick,best_score,best_lap_ms&nick=eq.${encodeURIComponent('Вася')}`,
+      `${URL_BASE}/rest/v1/leaderboard_ranked?select=place,nick,best_score,best_lap_ms,best_car&nick=eq.${encodeURIComponent('Вася')}`,
     );
   });
 
@@ -123,7 +123,7 @@ describe('leaderboard api: writes', () => {
 
   it('submits through the RPC and returns the standing', async () => {
     const { fetch, calls } = fakeFetch(json(standing));
-    const r = await api(fetch).submit({ key: 'k'.repeat(64), nick: 'Ёжик', score: 1500, lapMs: 52000, races: 2 });
+    const r = await api(fetch).submit({ key: 'k'.repeat(64), nick: 'Ёжик', score: 1500, lapMs: 52000, races: 2, car: null });
     expect(r).toEqual({ ok: true, value: { nick: 'Ёжик', place: 3, total: 12, score: 1500, lapMs: 52000 } });
     expect(calls[0].url).toBe(`${URL_BASE}/rest/v1/rpc/submit_result`);
     expect(calls[0].init.method).toBe('POST');
@@ -134,7 +134,24 @@ describe('leaderboard api: writes', () => {
       p_score: 1500,
       p_lap_ms: 52000,
       p_races: 2,
+      p_car: null,
     });
+  });
+
+  it('sends the car of the best score', async () => {
+    const { fetch, calls } = fakeFetch(json(standing));
+    await api(fetch).submit({ key: 'k'.repeat(64), nick: 'Ёжик', score: 1500, lapMs: 52000, races: 1, car: 'scarab' });
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ p_car: 'scarab' });
+  });
+
+  it('reads the car of each best and ignores unknown cars', async () => {
+    const rows = [
+      { place: 1, nick: 'Ёжик', best_score: 900, best_lap_ms: 50000, best_car: 'ronin' },
+      { place: 2, nick: 'Вася', best_score: 800, best_lap_ms: null, best_car: 'bmw' },
+      { place: 3, nick: 'Петя', best_score: 700, best_lap_ms: null, best_car: null },
+    ];
+    const r = await api(fakeFetch(json(rows)).fetch).board(null);
+    expect(r.ok && r.value.top.map((row) => row.car)).toEqual(['ronin', undefined, undefined]);
   });
 
   it('renames through the RPC', async () => {
@@ -147,7 +164,7 @@ describe('leaderboard api: writes', () => {
 
   it('maps the server refusals', async () => {
     const refusal = (message: string, status = 400) => json({ code: 'P0001', message, details: null, hint: null }, status);
-    const submit = (f: typeof fetch) => api(f).submit({ key: 'k', nick: 'Nick', score: 1, lapMs: null, races: 1 });
+    const submit = (f: typeof fetch) => api(f).submit({ key: 'k', nick: 'Nick', score: 1, lapMs: null, races: 1, car: null });
     expect(await submit(fakeFetch(refusal('nick_taken')).fetch)).toEqual({ ok: false, error: 'nick_taken' });
     expect(await submit(fakeFetch(refusal('rate_limited')).fetch)).toEqual({ ok: false, error: 'rate_limited' });
     expect(await submit(fakeFetch(refusal('unknown_player')).fetch)).toEqual({ ok: false, error: 'unknown_player' });

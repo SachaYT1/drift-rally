@@ -9,7 +9,7 @@ import type { GarageScene } from '../render/garageScene';
 import type { GameAudio } from '../audio/sfx';
 import type { InputController } from '../core/input';
 import type { Leaderboard } from './leaderboard';
-import { SAVE_KEY, readSave, updateSave } from '../core/save';
+import { GARAGE_KEY, SAVE_KEY, readSave, updateSave } from '../core/save';
 import { isQualityLevel, pixelRatioFor } from '../core/quality';
 import type { RaceScene } from './raceScene';
 
@@ -55,7 +55,7 @@ export interface App {
   /** Friends leaderboard; null: off (unit tests). */
   readonly leaderboard: Leaderboard | null;
   /**
-   * Progress (coins, records) as stored, kept current across tabs by the 'storage' event; settings (quality,
+   * Progress (coins, records, cars) as stored, kept current across tabs by the 'storage' event; settings (quality,
    * muted, ghosts) are this tab's live state.
    */
   readonly save: SaveData;
@@ -144,9 +144,16 @@ export function watchPixelRatio(win: Pick<Window, 'devicePixelRatio' | 'matchMed
   return () => query?.removeEventListener('change', fire);
 }
 
-/** Coins and records equal (settings aside). */
+/** Progress equal: coins, records and cars (settings aside). */
 function sameProgress(a: Readonly<SaveData>, b: Readonly<SaveData>): boolean {
-  return a.coins === b.coins && a.bestScore === b.bestScore && a.bestLapMs === b.bestLapMs;
+  return (
+    a.coins === b.coins &&
+    a.bestScore === b.bestScore &&
+    a.bestLapMs === b.bestLapMs &&
+    a.selectedCar === b.selectedCar &&
+    a.bestScoreCar === b.bestScoreCar &&
+    a.ownedCars.join() === b.ownedCars.join()
+  );
 }
 
 /** Make three re-evaluate the shader program of every material under `root` on its next use. */
@@ -191,10 +198,10 @@ export function createApp(d: AppDeps): App {
   const atStart = readSave(d.storage);
   if (atStart) adopt(atStart);
 
-  // Another tab saved (a finished race, a setting) or cleared the storage: follow its progress.
+  // Another tab saved (a finished race, a setting, a car) or cleared the storage: follow its progress.
   (d.storageEvents ?? window).addEventListener('storage', (e) => {
     const key = 'key' in e ? e.key : null;
-    if (key !== null && key !== SAVE_KEY) return;
+    if (key !== null && key !== SAVE_KEY && key !== GARAGE_KEY) return;
     const stored = readSave(d.storage);
     if (stored) adopt(stored);
   });

@@ -3,6 +3,7 @@
  * API, no SDK. Never throws: every call resolves to `{ ok: true, value }` or `{ ok: false, error }`.
  */
 import { sameNick, type Board, type BoardRow, type Standing } from '../shared/leaderboard';
+import { isCarId, type CarId } from '../shared/cars';
 
 /** Supabase project of the leaderboard. */
 export const LEADERBOARD_URL = 'https://brezucvcujjioibrmerd.supabase.co';
@@ -28,6 +29,8 @@ export interface SubmitRequest {
   lapMs: number | null;
   /** Finishes not sent yet (>= 1). */
   races: number;
+  /** The car of the best score, null when unknown. */
+  car: CarId | null;
 }
 
 export interface LeaderboardApi {
@@ -47,7 +50,7 @@ export interface LeaderboardApiOptions {
 }
 
 const KNOWN_ERRORS: readonly ApiError[] = ['nick_taken', 'rate_limited', 'unknown_player'];
-const ROW_COLUMNS = 'place,nick,best_score,best_lap_ms';
+const ROW_COLUMNS = 'place,nick,best_score,best_lap_ms,best_car';
 
 type Json = unknown;
 
@@ -70,7 +73,9 @@ function parseRow(v: Json): BoardRow | null {
   const score = finiteInt(v.best_score);
   const lap = v.best_lap_ms === null ? null : finiteInt(v.best_lap_ms);
   if (place === null || score === null || (v.best_lap_ms !== null && lap === null)) return null;
-  return { place, nick: v.nick, score, lapMs: lap };
+  const row: BoardRow = { place, nick: v.nick, score, lapMs: lap };
+  if (isCarId(v.best_car)) row.car = v.best_car;
+  return row;
 }
 
 function parseStanding(v: Json): Standing | null {
@@ -164,6 +169,7 @@ export function createLeaderboardApi(opts: LeaderboardApiOptions = {}): Leaderbo
         p_score: req.score,
         p_lap_ms: req.lapMs,
         p_races: req.races,
+        p_car: req.car,
       });
     },
 

@@ -55,8 +55,16 @@ describe('leaderboard service: finishes', () => {
     saveIdentity({ key: KEY, nick: 'Ёжик', pendingRaces: 2 }, storage);
     const { lb, api } = setup({ storage });
     expect(await lb.recordFinish()).toEqual({ kind: 'placed', place: 3, total: 12 });
-    expect(api.submit).toHaveBeenCalledWith({ key: KEY, nick: 'Ёжик', score: 1500, lapMs: 52000, races: 3 });
+    expect(api.submit).toHaveBeenCalledWith({ key: KEY, nick: 'Ёжик', score: 1500, lapMs: 52000, races: 3, car: null });
     expect(loadIdentity(storage)).toEqual({ key: KEY, nick: 'Ёжик', pendingRaces: 0 });
+  });
+
+  it('sends the car of the best score', async () => {
+    const storage = mem();
+    saveIdentity({ key: KEY, nick: 'Ёжик', pendingRaces: 0 }, storage);
+    const { lb, api } = setup({ storage, save: { ...RAN, bestScoreCar: 'quadro' } });
+    await lb.recordFinish();
+    expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ car: 'quadro' }));
   });
 
   it('keeps the finish for later when the table is unreachable or rate-limits', async () => {
@@ -130,7 +138,7 @@ describe('leaderboard service: nick', () => {
     });
     const { lb } = setup({ storage, api });
     expect(await lb.setNick('  Ёжик ')).toEqual({ ok: true, standing: standing('Ёжик', 1, 1) });
-    expect(api.submit).toHaveBeenCalledWith({ key: KEY, nick: 'Ёжик', score: 1500, lapMs: 52000, races: 2 });
+    expect(api.submit).toHaveBeenCalledWith({ key: KEY, nick: 'Ёжик', score: 1500, lapMs: 52000, races: 2, car: null });
     expect(loadIdentity(storage)).toEqual({ key: KEY, nick: 'Ёжик', pendingRaces: 0 });
   });
 

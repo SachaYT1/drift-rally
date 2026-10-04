@@ -3,6 +3,7 @@
  * mid-race forfeits. applyRaceResult is pure: returns a new SaveData, never mutates the input.
  */
 import type { RaceResult, SaveData } from '../shared/types';
+import type { CarId } from '../shared/cars';
 
 export interface SaveOutcome {
   save: SaveData;
@@ -18,11 +19,11 @@ function wholeNonNegative(v: number): number {
 }
 
 /**
- * coins += coinsEarned; bestScore = max(bestScore, round(totalPoints)); bestLapMs = min(bestLapMs,
- * round(bestLap * 1000)) (RaceResult times are seconds, the save keeps milliseconds). Settings fields
- * (quality, muted) are kept.
+ * coins += coinsEarned; bestScore = max(bestScore, round(totalPoints)) and bestScoreCar = `car` when that is a
+ * new best; bestLapMs = min(bestLapMs, round(bestLap * 1000)) (RaceResult times are seconds, the save keeps
+ * milliseconds). Settings fields (quality, muted) and the garage fields are kept.
  */
-export function applyRaceResult(save: Readonly<SaveData>, r: Readonly<RaceResult>): SaveOutcome {
+export function applyRaceResult(save: Readonly<SaveData>, r: Readonly<RaceResult>, car: CarId): SaveOutcome {
   const score = Number.isFinite(r.totalPoints) ? Math.max(0, Math.round(r.totalPoints)) : 0;
   const newBest = score > save.bestScore;
   const lapMs = Number.isFinite(r.bestLap) && r.bestLap > 0 ? Math.round(r.bestLap * 1000) : null;
@@ -32,6 +33,7 @@ export function applyRaceResult(save: Readonly<SaveData>, r: Readonly<RaceResult
       ...save,
       coins: wholeNonNegative(save.coins) + wholeNonNegative(r.coinsEarned),
       bestScore: newBest ? score : save.bestScore,
+      bestScoreCar: newBest ? car : save.bestScoreCar,
       bestLapMs: newBestLap ? lapMs : save.bestLapMs,
     },
     newBest,
@@ -45,13 +47,13 @@ export interface SaveStore {
 }
 
 /**
- * Applies a finished race to the save as stored NOW, not to the copy this tab loaded: another tab may have
- * raced (or changed a setting) since. newBest / newBestLap compare against that stored save.
+ * Applies a race finished in `car` to the save as stored NOW, not to the copy this tab loaded: another tab may
+ * have raced (or changed a setting) since. newBest / newBestLap compare against that stored save.
  */
-export function recordRaceResult(store: SaveStore, r: Readonly<RaceResult>): SaveOutcome {
+export function recordRaceResult(store: SaveStore, r: Readonly<RaceResult>, car: CarId): SaveOutcome {
   const applied: { outcome: SaveOutcome | null } = { outcome: null };
   store.updateSave((current) => {
-    applied.outcome = applyRaceResult(current, r);
+    applied.outcome = applyRaceResult(current, r, car);
     return applied.outcome.save;
   });
   if (applied.outcome === null) throw new Error('updateSave did not apply the race result');

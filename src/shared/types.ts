@@ -7,6 +7,7 @@
  * - `heading` h: forward = (sin h, cos h); left = (cos h, -sin h); +yaw turns LEFT.
  * - Three.js: models are built facing +Z, so `object.rotation.y = heading`.
  */
+import type { CarId } from './cars';
 
 export type SurfaceKind = 'road' | 'curb' | 'runoff' | 'outside';
 
@@ -275,4 +276,10 @@ export interface SaveData {
   muted: boolean;
   /** Race the ghost bots (plan/2026-10-04-ghost-bots-design.md). Absent in older saves: on. */
   ghosts: boolean;
+  /** Cars bought, in line-up order (shared/cars.ts CAR_IDS); always includes the free DEFAULT_CAR. */
+  ownedCars: readonly CarId[];
+  /** The car of the next race; always an owned one. */
+  selectedCar: CarId;
+  /** The car of the race that set bestScore; null before the first record (or one set before the line-up). */
+  bestScoreCar: CarId | null;
 }

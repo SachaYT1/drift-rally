@@ -128,7 +128,15 @@ const HUD_HTML = `
     <span class="dr-hint__exits" style="grid-column:1/-1;justify-content:center"><b>В заносе:</b> ${keyHtml('S')} — выход, контрруль или сброс газа — выровняться</span>
   </div>`;
 
-export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
+export function createHud(
+  root: HTMLElement,
+  opts: {
+    onPause(): void;
+    /** Speed that fills the speed bar, m/s: the car's top speed (default TUNING.car.maxSpeed). */
+    maxSpeed?: number;
+  },
+): Hud {
+  const barSpeed = opts.maxSpeed ?? TUNING.car.maxSpeed;
   const layer = createLayer(root, 'dr-hud', HUD_HTML);
   const ref = (name: string): HTMLElement => qs(layer, `[data-ref="${name}"]`);
   const el = {
@@ -301,7 +309,7 @@ export function createHud(root: HTMLElement, opts: { onPause(): void }): Hud {
     if (kmh !== shown.kmh) {
       shown.kmh = kmh;
       el.speed.textContent = formatKmh(v.speed);
-      const f = Math.min(1, Math.abs(v.speed) / TUNING.car.maxSpeed);
+      const f = Math.min(1, Math.abs(v.speed) / barSpeed);
       el.speedBar.style.transform = `scaleX(${f.toFixed(3)})`;
     }
     setWrong(v.wrongWay);
